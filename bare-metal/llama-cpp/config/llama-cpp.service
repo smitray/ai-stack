@@ -1,0 +1,17 @@
+[Unit]
+Description=llama.cpp Local LLM Server
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.env
+ExecStart=%h/.local/share/ai-stack/llama-cpp/llama.cpp/build/bin/llama-server \
+    --host 127.0.0.1 --port 8080 \
+    --models-preset %h/.config/ai-stack/llama-cpp/presets.ini \
+    --models-max 1 \
+    --sleep-idle-seconds 300
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
