@@ -1,0 +1,120 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    env_file: ${HOME}/.env
+    environment:
+      - POSTGRES_USER=aistack
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aistack"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: valkey
+    command: valkey-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 384m
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    volumes:
+      - ./qdrant/config/production.yaml:/qdrant/config/production.yaml:ro
+      - qdrant-storage:/qdrant/storage
+      - qdrant-snapshots:/qdrant/snapshots
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/readyz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./searxng/config:/etc/searxng:rw
+    environment:
+      - BASE_URL=http://localhost:8888/
+    depends_on:
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 256m
+    restart: unless-stopped
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-v1.61.16
+    container_name: litellm
+    ports:
+      - "4000:4000"
+    env_file: ${HOME}/.env
+    volumes:
+      - ./litellm/config/litellm-config.yaml:/app/config.yaml:ro
+    command: [ "--config", "/app/config.yaml" ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:4000/health/liveliness || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    restart: unless-stopped
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: openwebui
+    ports:
+      - "3000:8080"
+    env_file: ${HOME}/.env
+    environment:
+      - WEBUI_AUTH=false
+      - OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - RAG_EMBEDDING_ENGINE=
+      - RAG_EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
+      - RAG_EMBEDDING_BATCH_SIZE=26
+    volumes:
+      - open-webui-data:/app/backend/data
+    depends_on:
+      litellm:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+    mem_limit: 1g
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  valkey-data:
+  qdrant-storage:
+  qdrant-snapshots:
+  open-webui-data:
