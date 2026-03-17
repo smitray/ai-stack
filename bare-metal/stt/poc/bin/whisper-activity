@@ -1,0 +1,43 @@
+#!/bin/bash
+#
+# Whisper STT Activity Tracker
+# Records API activity for idle monitoring
+#
+
+set -euo pipefail
+
+readonly PORT="${WHISPER_PORT:-7861}"
+readonly API_URL="http://localhost:$PORT"
+readonly IDLE_FILE="/run/user/$(id -u)/whisper-api-idle"
+
+# Record activity timestamp
+record_activity() {
+    date +%s > "$IDLE_FILE" 2>/dev/null || true
+}
+
+# Start the idle monitor if not running
+start_monitor() {
+    if ! systemctl --user is-active --quiet whisper-idle-monitor.service 2>/dev/null; then
+        systemctl --user start whisper-idle-monitor.service 2>/dev/null || true
+    fi
+}
+
+# Main - record activity and start monitor
+case "${1:-record}" in
+    record)
+        record_activity
+        ;;
+    start)
+        record_activity
+        start_monitor
+        ;;
+    init)
+        # Initialize idle file and start monitor
+        record_activity
+        start_monitor
+        ;;
+    *)
+        echo "Usage: $0 {record|start|init}"
+        exit 1
+        ;;
+esac

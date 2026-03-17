@@ -1,0 +1,46 @@
+[Unit]
+Description=Whisper STT API Server
+Documentation=https://github.com/SYSTRAN/faster-whisper
+After=pipewire.service
+Wants=pipewire.service
+
+# Restart limits - prevent infinite restart loops
+StartLimitBurst=10
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+ExecStart=/home/debasmitr/.local/bin/whisper-api-server
+ExecStopPost=/home/debasmitr/.config/whisper-api/whisper-cleanup.sh
+Restart=on-failure
+RestartSec=5
+
+# Timeouts
+TimeoutStartSec=600
+TimeoutStopSec=30
+
+# Process management - ensure clean shutdown
+KillMode=mixed
+KillSignal=SIGTERM
+SendSIGKILL=yes
+FinalKillSignal=SIGKILL
+
+# Environment (minimal - most config in ~/.config/whisper-api/config.yaml)
+Environment="PYTHONPATH=/home/debasmitr/workspace/dotFileV2/install/stt/lib"
+Environment="LD_LIBRARY_PATH=/home/debasmitr/.local/lib/cuda-compat:/opt/cuda/lib64:/usr/lib"
+
+# Server runs continuously - no auto-shutdown
+# To free VRAM for other ML workloads, use:
+#   ~/.local/bin/whisper-ctl stop
+# To restart after loading other models:
+#   ~/.local/bin/whisper-ctl restart
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+# Start idle monitor after server is ready (wait 10s for model to load)
+ExecStartPost=/bin/sh -c 'sleep 10 && systemctl --user start whisper-idle-monitor.service &'
+
+[Install]
+WantedBy=default.target

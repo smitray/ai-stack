@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""
+Whisper STT API Server - Entry Point
+
+OpenAI-compatible REST API for local speech-to-text using Whisper model.
+Designed for continuous operation with GPU memory management.
+
+Usage:
+    whisper-api-server [options]
+
+Options:
+    --config, -c       Path to config file
+    --port, -p         Server port (overrides config)
+    --model, -m        Model name (overrides config)
+    --device, -d       Device: auto, cuda, cpu (overrides config)
+    --host             Host to bind to (overrides config)
+    --log-level        Log level: debug, info, warning, error
+
+Environment Variables:
+    WHISPER_PORT        Server port
+    WHISPER_MODEL       Model size (tiny/base/small/medium/large-v3)
+    WHISPER_DEVICE      Device preference (auto/cuda/cpu)
+    WHISPER_HOST       Host to bind to
+
+Example:
+    whisper-api-server --model small --device cuda
+    whisper-api-server --port 7861 --config /path/to/config.yaml
+"""
+
+import sys
+import os
+
+# Add lib directory to path for imports
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_lib_dir = os.path.join(os.path.dirname(_script_dir), 'lib')
+
+if _lib_dir not in sys.path:
+    sys.path.insert(0, _lib_dir)
+
+# Import and run the server
+from whisper_api.server import main
+
+if __name__ == "__main__":
+    main()

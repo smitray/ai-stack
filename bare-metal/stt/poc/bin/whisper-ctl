@@ -1,0 +1,422 @@
+#!/bin/bash
+#
+# whisper-ctl - Whisper API Server Management CLI
+#
+# CLI tool for managing the Whisper STT API server.
+# Controls server lifecycle, shows status, and manages VRAM.
+#
+# Usage: whisper-ctl <command>
+# Commands: start, stop, restart, status, waybar, logs, config, vram, help
+#
+# Author: debasmitr
+# Version: 2.0.0
+#
+
+set -euo pipefail
+
+readonly SCRIPT_NAME="whisper-ctl"
+readonly VERSION="2.0.0"
+
+# Paths
+readonly CONFIG_DIR="$HOME/.config/whisper-api"
+readonly CONFIG_FILE="$CONFIG_DIR/config.yaml"
+readonly RUN_DIR="/run/user/$(id -u)"
+readonly PID_FILE="$RUN_DIR/whisper-api-server.pid"
+readonly SERVER_LOG="$RUN_DIR/whisper-server.log"
+readonly PORT_FILE="$CONFIG_DIR/port"
+
+# Colors
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m'
+
+init() {
+    # Get port from config or default
+    if [[ -f "$PORT_FILE" ]]; then
+        PORT=$(cat "$PORT_FILE")
+    elif [[ -f "$CONFIG_FILE" ]]; then
+        PORT=$(grep -E "^\s*port:" "$CONFIG_FILE" 2>/dev/null | awk '{print $2}' || echo "7861")
+    else
+        PORT=7861
+    fi
+    
+    # Environment override
+    PORT="${WHISPER_PORT:-$PORT}"
+    
+    readonly PORT
+    readonly API_URL="http://localhost:$PORT"
+    readonly SERVER_SCRIPT="$HOME/.local/bin/whisper-api-server"
+}
+
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $*"
+}
+
+log_success() {
+    echo -e "${GREEN}[OK]${NC} $*"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $*"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $*" >&2
+}
+
+is_process_running() {
+    local pid="$1"
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+get_server_pid() {
+    # Try PID file first
+    if [[ -f "$PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+        if [[ -n "$pid" ]] && is_process_running "$pid"; then
+            echo "$pid"
+            return 0
+        fi
+    fi
+    
+    # Fallback to pgrep
+    pgrep -f "whisper-api-server" 2>/dev/null | head -1 || echo ""
+}
+
+is_server_running() {
+    [[ -n "$(get_server_pid)" ]]
+}
+
+check_server_health() {
+    curl -sf "$API_URL/health" >/dev/null 2>&1
+}
+
+check_server_ready() {
+    curl -sf "$API_URL/ready" >/dev/null 2>&1
+}
+
+get_vram_usage() {
+    nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | \
+        awk '{printf "%.0f / %.0f MiB (%.0f%%)", $1, $2, ($1/$2)*100}' || echo "N/A"
+}
+
+notify() {
+    local message="$1"
+    local urgency="${2:-normal}"
+    
+    if command -v notify-send &>/dev/null; then
+        notify-send -u "$urgency" -i "audio-input-microphone" -a "$SCRIPT_NAME" \
+            "$SCRIPT_NAME" "$message" 2>/dev/null || true
+    fi
+}
+
+cmd_start() {
+    if is_server_running; then
+        if check_server_ready; then
+            log_info "Server is already running and ready"
+            # Record activity (user is using it)
+            "$HOME/.local/bin/whisper-activity" record 2>/dev/null || true
+            cmd_status
+            return 0
+        else
+            log_warn "Server is running but not ready yet"
+            return 1
+        fi
+    fi
+
+    log_info "Starting Whisper API server..."
+
+    # Start server
+    if [[ ! -x "$SERVER_SCRIPT" ]]; then
+        log_error "Server script not found at $SERVER_SCRIPT"
+        log_error "Run install.sh to install the server"
+        return 1
+    fi
+
+    # Start in background
+    "$SERVER_SCRIPT" > "$SERVER_LOG" 2>&1 &
+    local pid=$!
+
+    echo "$pid" > "$PID_FILE" 2>/dev/null || true
+    chmod 600 "$PID_FILE" 2>/dev/null || true
+
+    # Start idle monitor
+    "$HOME/.local/bin/whisper-activity" init 2>/dev/null || true
+
+    # Wait for server to be ready
+    local max_wait=120
+    local waited=0
+
+    log_info "Waiting for server to be ready..."
+
+    while [[ $waited -lt $max_wait ]]; do
+        sleep 1
+        ((waited++))
+
+        if check_server_ready; then
+            log_success "Server ready!"
+            return 0
+        fi
+
+        # Check if process crashed
+        if ! is_process_running "$pid"; then
+            log_error "Server crashed. Check logs:"
+            log_error "  tail -f $SERVER_LOG"
+            return 1
+        fi
+
+        if [[ $((waited % 10)) -eq 0 ]]; then
+            log_info "Still starting... ($waited/$max_wait seconds)"
+        fi
+    done
+
+    log_error "Server failed to start within ${max_wait}s"
+    return 1
+}
+
+cmd_stop() {
+    local pid
+    pid=$(get_server_pid)
+    
+    if [[ -z "$pid" ]]; then
+        log_info "Server is not running"
+        return 0
+    fi
+    
+    log_info "Stopping Whisper API server..."
+    
+    # Get VRAM before stopping
+    local vram_before
+    vram_before=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1 || echo "0")
+    
+    # Send SIGTERM for graceful shutdown
+    kill "$pid" 2>/dev/null || true
+    
+    # Wait for process to exit
+    local timeout=30
+    while is_process_running "$pid" && [[ $timeout -gt 0 ]]; do
+        sleep 0.5
+        ((timeout--))
+    done
+    
+    # Force kill if still running
+    if is_process_running "$pid"; then
+        log_warn "Force killing server..."
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+    
+    # Clean up
+    rm -f "$PID_FILE" 2>/dev/null || true
+    
+    # Show VRAM freed
+    sleep 1
+    local vram_after
+    vram_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1 || echo "0")
+    local vram_freed=$((vram_before - vram_after))
+    
+    if [[ $vram_freed -gt 0 ]]; then
+        log_success "Server stopped"
+        log_success "VRAM freed: ${vram_freed} MiB"
+        log_success "Current VRAM: ${vram_after} MiB"
+    else
+        log_success "Server stopped"
+    fi
+    
+    notify "Server stopped - VRAM freed" "low"
+}
+
+cmd_restart() {
+    log_info "Restarting Whisper API server..."
+    cmd_stop
+    sleep 1
+    cmd_start
+}
+
+cmd_status() {
+    local pid
+    pid=$(get_server_pid)
+    
+    echo ""
+    echo "┌─────────────────────────────────────────────┐"
+    echo "│ Whisper API Server Status                   │"
+    echo "├─────────────────────────────────────────────┤"
+    
+    if [[ -z "$pid" ]]; then
+        echo "│ Status:     ${RED}● Stopped${NC}                       │"
+        echo "│ URL:        http://localhost:$PORT              │"
+    else
+        local status_json
+        status_json=$(curl -s "$API_URL/status" 2>/dev/null || echo '{}')
+        
+        local model device compute loaded vram_used vram_total vram_percent
+        model=$(echo "$status_json" | grep -o '"model":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+        device=$(echo "$status_json" | grep -o '"device":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+        compute=$(echo "$status_json" | grep -o '"compute_type":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+        loaded=$(echo "$status_json" | grep -o '"model_loaded":[a-z]*' | cut -d':' -f2 || echo "false")
+        vram_used=$(echo "$status_json" | grep -o '"used_mb":[0-9]*' | cut -d':' -f2 || echo "0")
+        vram_total=$(echo "$status_json" | grep -o '"total_mb":[0-9]*' | cut -d':' -f2 || echo "0")
+        vram_percent=$(echo "$status_json" | grep -o '"percent":[0-9.]*' | cut -d':' -f2 || echo "0")
+        
+        if [[ "$loaded" == "true" ]]; then
+            echo "│ Status:     ${GREEN}● Running${NC}                       │"
+        else
+            echo "│ Status:     ${YELLOW}● Loading${NC}                       │"
+        fi
+        
+        echo "│ Model:      $model ($compute)                │"
+        echo "│ Device:     $device                           │"
+        echo "│ Port:       $PORT                             │"
+        
+        if [[ -n "$vram_total" ]] && [[ "$vram_total" != "0" ]]; then
+            echo "│ VRAM:       ${vram_used} MiB / ${vram_total} MiB (${vram_percent}%)      │"
+        else
+            echo "│ VRAM:       N/A (CPU mode)                    │"
+        fi
+        
+        echo "│ PID:        $pid                              │"
+    fi
+    
+    echo "└─────────────────────────────────────────────┘"
+    echo ""
+}
+
+cmd_waybar() {
+    # JSON output for waybar
+    
+    if ! is_server_running; then
+        echo '{"text":"🔴","class":"server-stopped","tooltip":"STT Server Stopped"}'
+        return 0
+    fi
+    
+    if ! check_server_ready; then
+        echo '{"text":"⏳","class":"server-loading","tooltip":"STT Loading model..."}'
+        return 0
+    fi
+    
+    # Get device info
+    local status_json
+    status_json=$(curl -s "$API_URL/status" 2>/dev/null || echo '{}')
+    local device
+    device=$(echo "$status_json" | grep -o '"device":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+    
+    echo "{\"text\":\"🟢\",\"class\":\"server-ready\",\"tooltip\":\"STT Ready ($device)\"}"
+}
+
+cmd_logs() {
+    local lines="${1:-50}"
+    
+    if [[ -f "$SERVER_LOG" ]]; then
+        tail -n "$lines" "$SERVER_LOG"
+    else
+        log_info "No server logs found"
+        log_info "Server may not have been started yet"
+    fi
+}
+
+cmd_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        cat "$CONFIG_FILE"
+    else
+        log_warn "Config file not found at $CONFIG_FILE"
+        log_info "Creating default config..."
+        mkdir -p "$CONFIG_DIR"
+        cp "$(dirname "$(readlink -f "$0")")/../config/config.example.yaml" "$CONFIG_FILE"
+        log_success "Config created at $CONFIG_FILE"
+    fi
+}
+
+cmd_vram() {
+    if command -v nvidia-smi &>/dev/null; then
+        echo ""
+        nvidia-smi --query-gpu=name,memory.used,memory.total,memory.free --format=csv
+        echo ""
+        
+        local status_json
+        status_json=$(curl -s "$API_URL/status" 2>/dev/null || echo '{}')
+        
+        if [[ -n "$status_json" ]]; then
+            echo "Server VRAM usage: $(echo "$status_json" | grep -o '"used_mb":[0-9]*' | cut -d':' -f2 || echo '0') MiB"
+        fi
+    else
+        log_error "nvidia-smi not found. Are NVIDIA drivers installed?"
+    fi
+}
+
+cmd_help() {
+    cat <<EOF
+$SCRIPT_NAME v$VERSION - Whisper API Server Management
+
+Usage: $SCRIPT_NAME <command>
+
+Commands:
+  start           Start the server and wait for model to load
+  stop            Stop the server and free VRAM
+  restart         Restart the server
+  status          Show detailed server status
+  waybar          Show status in JSON format (for waybar)
+  logs [lines]    View server logs (default: 50 lines)
+  config          Show/edit configuration
+  vram            Show GPU VRAM usage
+  help            Show this help
+
+Examples:
+  $SCRIPT_NAME start         # Start server, wait for ready
+  $SCRIPT_NAME stop          # Stop server, free VRAM
+  $SCRIPT_NAME restart       # Restart server
+  $SCRIPT_NAME status        # Show status
+  $SCRIPT_NAME waybar        # JSON for waybar
+  $SCRIPT_NAME vram          # Check VRAM usage
+
+Keybindings (Hyprland):
+  SUPER ALT + S    Stop server (free VRAM)
+  SUPER SHIFT + S  Start server
+  SUPER SHIFT + R  Restart server
+  SUPER + .        Show status
+EOF
+}
+
+main() {
+    init
+    
+    local command="${1:-status}"
+    
+    case "$command" in
+        start)
+            cmd_start
+            ;;
+        stop)
+            cmd_stop
+            ;;
+        restart)
+            cmd_restart
+            ;;
+        status)
+            cmd_status
+            ;;
+        waybar)
+            cmd_waybar
+            ;;
+        logs)
+            cmd_logs "${2:-50}"
+            ;;
+        config)
+            cmd_config
+            ;;
+        vram)
+            cmd_vram
+            ;;
+        help|--help|-h)
+            cmd_help
+            ;;
+        *)
+            echo "Unknown command: $command"
+            echo "Run '$SCRIPT_NAME help' for usage."
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

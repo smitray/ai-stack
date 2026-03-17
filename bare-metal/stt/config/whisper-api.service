@@ -1,0 +1,13 @@
+[Unit]
+Description=Whisper API Server
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.env
+ExecStart=%h/.local/share/ai-stack/whisper-venv/bin/python %h/.local/bin/whisper-api-server --config %h/.config/ai-stack/whisper-api/config.yaml
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Whisper Idle Monitor
+After=whisper-api.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/whisper-idle-monitor.sh
+
+[Install]
+WantedBy=default.target

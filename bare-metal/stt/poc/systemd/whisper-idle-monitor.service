@@ -1,0 +1,24 @@
+[Unit]
+Description=Whisper STT Idle Monitor
+Documentation=https://github.com/SYSTRAN/faster-whisper
+After=whisper-api.service
+PartOf=whisper-api.service
+
+[Service]
+Type=simple
+ExecStart=/home/debasmitr/.config/whisper-api/whisper-idle-monitor.sh
+Restart=on-failure
+RestartSec=10
+
+# Environment
+Environment="WHISPER_PORT=7861"
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+# Give monitor time to wait for server
+TimeoutStartSec=90
+
+[Install]
+WantedBy=default.target

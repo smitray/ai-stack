@@ -1,0 +1,73 @@
+# Whisper API Server Configuration
+# ~/.config/whisper-api/config.yaml
+
+# =============================================================================
+# Server Configuration
+# =============================================================================
+server:
+  # Host to bind to
+  # 127.0.0.1 = local only (recommended for security)
+  # 0.0.0.0 = allow LAN access
+  host: 127.0.0.1
+  
+  # HTTP server port
+  # Default: 7861
+  port: 7861
+
+# =============================================================================
+# Model Configuration
+# =============================================================================
+model:
+  # Whisper model to use
+  # Options: tiny, base, small, medium, large-v3
+  # tiny   = 39MB,  ~300MB VRAM, fastest, lowest accuracy
+  # base   = 74MB,  ~400MB VRAM, fast, decent accuracy
+  # small  = 244MB, ~600MB VRAM, balanced, good accuracy (DEFAULT)
+  # medium = 769MB, ~1.5GB VRAM, slow, better accuracy
+  # large-v3 = 3GB, ~3GB VRAM, slowest, best accuracy
+  name: small
+  
+  # Device for inference
+  # auto   = automatically detect GPU/CPU (RECOMMENDED)
+  # cuda   = force NVIDIA GPU
+  # cpu    = force CPU (slower, no VRAM used)
+  device: auto
+  
+  # Compute type (precision)
+  # auto   = automatic based on device
+  # float16 = faster on GPU (half precision)
+  # int8    = faster on CPU (quantized)
+  compute_type: auto
+
+# =============================================================================
+# GPU Configuration
+# =============================================================================
+gpu:
+  # Minimum VRAM required to use GPU (in MB)
+  # If GPU has less free VRAM, will fall back to CPU
+  # RTX 3050 has 4GB, recommended minimum: 600MB for small model
+  min_vram_mb: 600
+  
+  # Fall back to CPU if GPU is not available or has insufficient VRAM
+  fallback_to_cpu: true
+
+# =============================================================================
+# Notification Configuration
+# =============================================================================
+notification:
+  # Enable desktop notifications
+  enabled: true
+  
+  # Send notification when model is loaded and ready
+  on_ready: true
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+logging:
+  # Log level: debug, info, warning, error
+  level: INFO
+  
+  # Log file path (optional)
+  # If not set, logs only to stdout
+  # file: ~/.local/share/whisper-api/logs/server.log

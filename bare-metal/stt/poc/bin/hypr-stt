@@ -1,0 +1,861 @@
+#!/bin/bash
+#
+# hypr-stt - Hyprland Speech-to-Text Client
+#
+# Modular STT client for Hyprland Wayland compositor.
+# Records audio, transcribes via local Whisper API, and types result.
+#
+# Usage: hypr-stt <command>
+# Commands: toggle, start, stop, status, stop-server, start-server, restart-server,
+#           reset, list-mics, select-mic, help
+#
+# Author: debasmitr
+# Version: 2.1.0
+#
+
+set -euo pipefail
+
+# =============================================================================
+# Constants & Configuration
+# =============================================================================
+
+readonly SCRIPT_NAME="hypr-stt"
+readonly VERSION="2.1.0"
+
+# Paths
+readonly ENV_FILE="$HOME/.config/hypr-stt/env"
+readonly RUN_DIR="/run/user/$(id -u)"
+readonly STATE_FILE="$RUN_DIR/hypr-stt-state"
+readonly AUDIO_FILE="$RUN_DIR/hypr-stt-recording.wav"
+readonly PID_FILE="$RUN_DIR/hypr-stt-pid"
+readonly SERVER_PID_FILE="$RUN_DIR/whisper-api-server.pid"
+readonly SERVER_LOG="$RUN_DIR/whisper-server.log"
+
+# Recording settings
+readonly SAMPLE_RATE=16000
+readonly CHANNELS=1
+readonly FORMAT="s16"
+
+# =============================================================================
+# Logging
+# =============================================================================
+
+readonly LOG_DIR="$XDG_DATA_HOME/$SCRIPT_NAME"
+readonly LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d).log"
+
+init_log() {
+    mkdir -p "$LOG_DIR" 2>/dev/null || true
+    chmod 700 "$LOG_DIR" 2>/dev/null || true
+}
+
+log_msg() {
+    local level="$1"
+    local message="$2"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
+}
+
+log_info() { log_msg "INFO" "$1"; }
+log_error() { log_msg "ERROR" "$1"; }
+log_debug() { log_msg "DEBUG" "$1"; }
+
+# =============================================================================
+# Initialization
+# =============================================================================
+
+init() {
+    # Initialize logging first
+    init_log
+    
+    # Source environment configuration
+    if [[ -f "$ENV_FILE" ]]; then
+        # shellcheck source=/dev/null
+        source "$ENV_FILE"
+    fi
+    
+    # Apply environment variables with defaults
+    API_URL="${HYPR_STT_API_URL:-http://localhost:${WHISPER_PORT:-7861}/v1/audio/transcriptions}"
+    MODEL="${HYPR_STT_MODEL:-${WHISPER_MODEL:-small}}"
+    PORT="${HYPR_STT_PORT:-${WHISPER_PORT:-7861}}"
+    LANGUAGE="${HYPR_STT_LANGUAGE:-en}"
+    SERVER_SCRIPT="${HYPR_STT_SERVER:-$HOME/.local/bin/whisper-api-server}"
+    KEYBIND="${HYPR_STT_KEYBIND:-SUPER+N}"
+    
+    # Secure file permissions
+    umask 077
+}
+
+# =============================================================================
+# State Management
+# =============================================================================
+
+get_state() {
+    cat "$STATE_FILE" 2>/dev/null || echo "idle"
+}
+
+set_state() {
+    local state="$1"
+    local tmp_file
+    tmp_file=$(mktemp)
+    echo "$state" > "$tmp_file"
+    mv "$tmp_file" "$STATE_FILE" 2>/dev/null || true
+    chmod 600 "$STATE_FILE" 2>/dev/null || true
+    
+    # Signal waybar to update
+    pkill -RTMIN+8 waybar 2>/dev/null || true
+}
+
+is_process_running() {
+    local pid="$1"
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+pactl_ok() {
+    command -v pactl &>/dev/null || return 1
+    pactl info >/dev/null 2>&1
+}
+
+# =============================================================================
+# Cleanup Functions
+# =============================================================================
+
+cleanup_stale_processes() {
+    # Kill any stale pw-record processes
+    pkill -f "pw-record.*$AUDIO_FILE" 2>/dev/null || true
+    
+    # Remove stale PID files
+    if [[ -f "$PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+        if [[ -n "$pid" ]] && ! is_process_running "$pid"; then
+            rm -f "$PID_FILE"
+        fi
+    fi
+    
+    if [[ -f "$SERVER_PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$SERVER_PID_FILE" 2>/dev/null || echo "")
+        if [[ -n "$pid" ]] && ! is_process_running "$pid"; then
+            rm -f "$SERVER_PID_FILE" "$SERVER_LOG"
+        fi
+    fi
+    
+    # Remove stale audio file only when not recording
+    local _state
+    _state=$(get_state 2>/dev/null || echo "idle")
+    if [[ "$_state" != "recording" ]]; then
+        rm -f "$AUDIO_FILE" 2>/dev/null || true
+    fi
+}
+
+# =============================================================================
+# Notifications
+# =============================================================================
+
+notify() {
+    local icon="$1"
+    local message="$2"
+    local urgency="${3:-normal}"
+    
+    if command -v notify-send &>/dev/null; then
+        notify-send -u "$urgency" -i "$icon" -a "$SCRIPT_NAME" "$SCRIPT_NAME" "$message" 2>/dev/null || true
+    fi
+}
+
+# =============================================================================
+# Server Management
+# =============================================================================
+
+server_ready() {
+    curl -sf "http://localhost:$PORT/ready" >/dev/null 2>&1
+}
+
+server_healthy() {
+    server_ready
+}
+
+check_gpu_available() {
+    if ! command -v nvidia-smi &>/dev/null; then
+        return 1
+    fi
+    local free_mem
+    free_mem=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -1)
+    [[ -n "$free_mem" && "$free_mem" -gt 600 ]]
+}
+
+start_server() {
+    if server_healthy; then
+        log_info "Server already running"
+        return 0
+    fi
+
+    log_info "Starting Whisper server..."
+
+    # Prefer systemctl if available
+    if command -v systemctl &>/dev/null; then
+        # Start via systemd
+        if systemctl --user start whisper-api.service 2>/dev/null; then
+            # Wait for server to be fully ready (model loaded)
+            local max_wait=120
+            local waited=0
+            
+            log_info "Waiting for server to load model..."
+            
+            while [[ $waited -lt $max_wait ]]; do
+                sleep 1
+                ((waited++))
+                
+                # Check if server is healthy AND model is loaded
+                if server_healthy; then
+                    local status
+                    status=$(curl -s http://localhost:$PORT/status 2>/dev/null || echo '{}')
+                    local loaded
+                    loaded=$(echo "$status" | grep -o '"model_loaded":true' || echo "")
+                    
+                    if [[ -n "$loaded" ]]; then
+                        log_info "Server ready, model loaded"
+                        # Verify runtime files exist
+                        if [[ -f "$SERVER_PID_FILE" ]] || pgrep -f "whisper-api-server" >/dev/null 2>&1; then
+                            log_info "Runtime files verified"
+                            return 0
+                        fi
+                    fi
+                fi
+                
+                # Check if service failed
+                if ! systemctl --user is-active --quiet whisper-api.service 2>/dev/null; then
+                    log_error "Server failed to start"
+                    return 1
+                fi
+            done
+            
+            log_error "Server timeout after ${max_wait}s"
+            return 1
+        else
+            log_error "Failed to start systemd service"
+            return 1
+        fi
+    fi
+    
+    # Fallback: direct start (non-systemd)
+    log_info "Starting server directly (systemd unavailable)"
+    
+    # Determine device
+    local device="cpu"
+    if check_gpu_available; then
+        device="cuda"
+    fi
+
+    # Find server script
+    local script_path=""
+    for path in "$SERVER_SCRIPT" "$HOME/.local/bin/whisper-api-server" "$(dirname "$(readlink -f "$0")")/whisper-api-server"; do
+        if [[ -x "$path" ]]; then
+            script_path="$path"
+            break
+        fi
+    done
+
+    if [[ -z "$script_path" ]]; then
+        log_error "Server script not found"
+        return 1
+    fi
+
+    # Start server
+    WHISPER_PORT="$PORT" \
+    WHISPER_MODEL="$MODEL" \
+    WHISPER_DEVICE="$device" \
+    "$script_path" > "$SERVER_LOG" 2>&1 &
+    local pid=$!
+
+    echo "$pid" > "$SERVER_PID_FILE" 2>/dev/null || true
+    chmod 600 "$SERVER_PID_FILE" 2>/dev/null || true
+
+    # Wait for server to be ready
+    local max_wait=120
+    local waited=0
+
+    while [[ $waited -lt $max_wait ]]; do
+        sleep 1
+        ((waited++))
+
+        if server_healthy; then
+            log_info "Server ready"
+            return 0
+        fi
+
+        if ! is_process_running "$pid"; then
+            log_error "Server crashed"
+            return 1
+        fi
+    done
+
+    log_error "Server timeout"
+    return 1
+}
+
+stop_server() {
+    # Prefer systemctl if service is managed by systemd
+    if command -v systemctl &>/dev/null && systemctl --user is-active --quiet whisper-api.service 2>/dev/null; then
+        log_info "Stopping Whisper server..."
+        if systemctl --user stop whisper-api.service 2>/dev/null; then
+            log_info "Server stopped"
+            return 0
+        fi
+    fi
+    
+    # Fallback: direct stop
+    local pid=""
+
+    # Try PID file first
+    if [[ -f "$SERVER_PID_FILE" ]]; then
+        pid=$(cat "$SERVER_PID_FILE" 2>/dev/null || echo "")
+    fi
+
+    # Fallback: find by process name
+    if [[ -z "$pid" ]] || ! is_process_running "$pid"; then
+        pid=$(pgrep -f "whisper-api-server" 2>/dev/null | head -1 || echo "")
+    fi
+
+    if [[ -n "$pid" ]] && is_process_running "$pid"; then
+        log_info "Stopping server (PID: $pid)"
+        kill "$pid" 2>/dev/null || true
+
+        # Wait for graceful shutdown
+        local timeout=30
+        while is_process_running "$pid" && [[ $timeout -gt 0 ]]; do
+            sleep 0.2
+            ((timeout--))
+        done
+
+        # Force kill if still running
+        if is_process_running "$pid"; then
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+
+        rm -f "$SERVER_PID_FILE" "$SERVER_LOG" 2>/dev/null || true
+        log_info "Server stopped"
+    else
+        log_info "Server not running"
+    fi
+}
+
+# =============================================================================
+# Audio Device Management
+# =============================================================================
+
+list_input_devices() {
+    echo "Available audio input devices:"
+    echo "=============================="
+    
+    # Get all sources, filter out monitors, format with awk
+    pactl list sources short 2>/dev/null | grep -v ".monitor" | awk '
+    BEGIN { idx=0 }
+    {
+        idx++
+        name=$2
+        state=$6
+        
+        # Determine device type
+        if (name ~ /bluez/) {
+            dtype="Bluetooth"
+        } else if (name ~ /alsa/) {
+            dtype="Built-in/USB"
+        } else {
+            dtype="Other"
+        }
+        
+        # Mark active device
+        marker = (state == "RUNNING") ? " (active)" : ""
+        
+        printf "%d. %-60s [%s]%s\n", idx, name, dtype, marker
+    }
+    END {
+        if (idx == 0) {
+            print "No audio input devices found."
+        }
+    }'
+    
+    echo ""
+    echo "Current default: $(pactl get-default-source 2>/dev/null || echo "unknown")"
+}
+
+get_preferred_mic() {
+    # Prefer Bluetooth headset if connected
+    local source
+    source=$(pactl list sources short 2>/dev/null | grep -iE "bluez.*input|wh-1000xm5" | awk '{print $2}' | head -1)
+    
+    if [[ -n "$source" ]]; then
+        echo "$source"
+    else
+        pactl get-default-source 2>/dev/null || echo "@DEFAULT_SOURCE@"
+    fi
+}
+
+# =============================================================================
+# Recording Functions
+# =============================================================================
+
+start_recording() {
+    # Check if server is ready, auto-start if not
+    if ! server_ready; then
+        log_info "Server not ready, auto-starting..."
+        if ! start_server; then
+            log_error "Failed to start server"
+            notify "dialog-error" "STT server failed to start" "critical"
+            echo "Error: Failed to start server" >&2
+            return 1
+        fi
+        log_info "Server started successfully"
+    fi
+    
+    # Verify runtime files are created and server is fully ready
+    sleep 0.5
+    if [[ ! -f "$SERVER_PID_FILE" ]] && ! pgrep -f "whisper-api-server" >/dev/null 2>&1; then
+        log_error "Runtime files not created"
+        return 1
+    fi
+    
+    # Verify API is actually responding with model loaded
+    local status
+    status=$(curl -s http://localhost:$PORT/status 2>/dev/null || echo '{}')
+    local loaded
+    loaded=$(echo "$status" | grep -o '"model_loaded":true' || echo "")
+    
+    if [[ -z "$loaded" ]]; then
+        log_error "Model not loaded yet"
+        return 1
+    fi
+    
+    log_info "Server fully ready, runtime files verified"
+
+    set_state "recording"
+    notify "audio-input-microphone" "Ready to record" "low"
+    log_info "Recording started"
+
+    local mic
+    mic=$(get_preferred_mic)
+
+    # Start pw-record in background
+    pw-record --target="$mic" --rate="$SAMPLE_RATE" --channels="$CHANNELS" --format="$FORMAT" "$AUDIO_FILE" &
+    local pid=$!
+
+    echo "$pid" > "$PID_FILE" 2>/dev/null || true
+    chmod 600 "$PID_FILE" 2>/dev/null || true
+
+    log_info "Recording from: $mic"
+}
+
+stop_recording() {
+    local pid=""
+
+    if [[ -f "$PID_FILE" ]]; then
+        pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+    fi
+
+    # Also find by process if PID file missing
+    if [[ -z "$pid" ]] || ! is_process_running "$pid"; then
+        pid=$(pgrep -f "pw-record.*$AUDIO_FILE" 2>/dev/null | head -1 || echo "")
+    fi
+
+    if [[ -n "$pid" ]] && is_process_running "$pid"; then
+        # Send SIGINT to properly flush WAV file header
+        kill -INT "$pid" 2>/dev/null || true
+        # Wait for process to finish writing
+        sleep 0.5
+        wait "$pid" 2>/dev/null || true
+    fi
+
+    rm -f "$PID_FILE" 2>/dev/null || true
+
+    set_state "processing"
+    notify "emblem-synchronizing" "Processing..." "low"
+    log_info "Processing recording..."
+
+    # Wait for audio file
+    sleep 0.5
+    local timeout=10
+    while [[ ! -f "$AUDIO_FILE" ]] && [[ $timeout -gt 0 ]]; do
+        sleep 0.1
+        ((timeout--))
+    done
+
+    if [[ ! -f "$AUDIO_FILE" ]] || [[ ! -s "$AUDIO_FILE" ]]; then
+        log_error "No audio file created"
+        set_state "idle"
+        return 1
+    fi
+
+    # Check file size for long recordings
+    local file_size
+    file_size=$(stat -f%z "$AUDIO_FILE" 2>/dev/null || stat -c%s "$AUDIO_FILE" 2>/dev/null || echo "0")
+    local duration_estimate=$((file_size / 32000))  # ~16kbps, rough estimate in seconds
+    
+    if [[ $duration_estimate -gt 60 ]]; then
+        log_info "Long recording detected: ~${duration_estimate}s"
+        notify "emblem-synchronizing" "Long recording (${duration_estimate}s) - this may take a while..." "low"
+    fi
+
+    chmod 600 "$AUDIO_FILE" 2>/dev/null || true
+    log_info "Audio file ready: $AUDIO_FILE (${file_size} bytes)"
+
+    # Transcribe (no notification of result)
+    transcribe_audio
+
+    set_state "idle"
+}
+
+# =============================================================================
+# Transcription
+# =============================================================================
+
+transcribe_audio() {
+    local response http_code body text
+    # Increased retries and timeout for long conversations
+    local max_retries=5
+    local retry_delay=3
+    local attempt
+    # 10 minute timeout for long audio files
+    local api_timeout=600
+
+    log_info "Transcribing audio..."
+
+    for attempt in $(seq 1 $max_retries); do
+        # Make API request with extended timeout for long conversations
+        response=$(curl -s -w "\n%{http_code}" \
+            --max-time $api_timeout \
+            --connect-timeout 30 \
+            -X POST "$API_URL" \
+            -F "file=@$AUDIO_FILE;type=audio/wav" \
+            -F "model=$MODEL" \
+            -F "language=$LANGUAGE" \
+            -F "response_format=text" 2>/dev/null) || true
+
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | sed '$d' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+        if [[ "$http_code" == "200" ]]; then
+            break  # Success, exit retry loop
+        elif [[ "$http_code" == "503" || "$http_code" == "504" ]] && [[ $attempt -lt $max_retries ]]; then
+            # Service unavailable or gateway timeout - server busy with long transcription
+            log_info "Server busy, retrying ($attempt/$max_retries)..."
+            sleep $retry_delay
+            retry_delay=$((retry_delay * 2))
+        elif [[ "$http_code" == "500" ]] && [[ $attempt -lt $max_retries ]]; then
+            log_info "Server error, retrying ($attempt/$max_retries)..."
+            sleep $retry_delay
+            retry_delay=$((retry_delay * 2))
+        fi
+    done
+
+    # Cleanup audio file
+    rm -f "$AUDIO_FILE" 2>/dev/null || true
+
+    if [[ "$http_code" == "200" ]]; then
+        # Record activity for idle monitor
+        "$HOME/.local/bin/whisper-activity" record 2>/dev/null || true
+        
+        if [[ -n "$body" && "$body" != "null" && "$body" != "''" ]]; then
+            # Capitalize first letter
+            text=$(echo "$body" | sed 's/^./\U&/')
+
+            # Type the text (no notification)
+            type_text "$text"
+
+            # Log the transcription (no notification)
+            log_info "Transcribed: $text"
+        else
+            log_info "No speech detected"
+        fi
+    else
+        log_error "Transcription failed (HTTP $http_code)"
+        [[ -n "$body" ]] && log_error "Response: $body"
+        # Show error for long transcription failures
+        if [[ "$http_code" == "000" ]]; then
+            log_error "Connection failed - server may have crashed or timed out"
+        fi
+    fi
+}
+
+# =============================================================================
+# Text Input Methods
+# =============================================================================
+
+type_text() {
+    local text="$1"
+    
+    # Method 1: wtype (Wayland native)
+    if command -v wtype &>/dev/null; then
+        wtype "$text" 2>/dev/null && return 0
+    fi
+    
+    # Method 2: ydotool (fallback)
+    if command -v ydotool &>/dev/null; then
+        ydotool type "$text" 2>/dev/null && return 0
+    fi
+    
+    # Method 3: Clipboard (last resort)
+    if command -v wl-copy &>/dev/null; then
+        echo -n "$text" | wl-copy
+        notify "dialog-warning" "Text copied to clipboard" "normal"
+        return 0
+    fi
+    
+    notify "dialog-error" "No typing method available" "critical"
+    return 0
+}
+
+# =============================================================================
+# Commands
+# =============================================================================
+
+cmd_toggle() {
+    cleanup_stale_processes
+    
+    local state
+    state=$(get_state)
+    
+    case "$state" in
+        "idle")
+            start_recording
+            ;;
+        "recording")
+            stop_recording
+            ;;
+        "processing")
+            notify "dialog-information" "Still processing, please wait..." "low"
+            ;;
+        *)
+            set_state "idle"
+            cmd_toggle
+            ;;
+    esac
+}
+
+cmd_start() {
+    cleanup_stale_processes
+    local state
+    state=$(get_state)
+    
+    if [[ "$state" == "recording" ]]; then
+        notify "dialog-information" "Already recording" "low"
+        return 0
+    fi
+    
+    start_recording
+}
+
+cmd_stop() {
+    local state
+    state=$(get_state)
+    
+    if [[ "$state" != "recording" ]]; then
+        notify "dialog-information" "Not recording" "low"
+        return 0
+    fi
+    
+    stop_recording
+}
+
+cmd_status() {
+    cleanup_stale_processes
+    local state
+    state=$(get_state)
+    
+    case "$state" in
+        "recording")
+            echo '{"text":"🎤","class":"recording","tooltip":"Recording... Click to stop"}'
+            ;;
+        "processing")
+            echo '{"text":"⏳","class":"processing","tooltip":"Processing audio..."}'
+            ;;
+        *)
+            # Check server status
+            if server_ready; then
+                local health device
+                health=$(curl -s "http://localhost:$PORT/health" 2>/dev/null || echo '{}')
+                device=$(echo "$health" | grep -o '"device":"[^"]*"' | cut -d'"' -f4 || echo "")
+                echo "{\"text\":\"\",\"class\":\"idle-ready\",\"tooltip\":\"STT Ready ($device) - $KEYBIND\"}"
+            else
+                echo '{"text":"⏳","class":"idle-loading","tooltip":"STT Loading... Use whisper-ctl start\"}'
+            fi
+            ;;
+    esac
+}
+
+cmd_stop_server() {
+    stop_server
+}
+
+cmd_start_server() {
+    if server_healthy; then
+        notify "dialog-information" "Server already running" "low"
+        echo "Server is already running on port $PORT"
+        return 0
+    fi
+    
+    echo "Starting Whisper API server..."
+    if start_server; then
+        echo "Server started successfully on port $PORT"
+    else
+        echo "Failed to start server"
+        return 1
+    fi
+}
+
+cmd_restart_server() {
+    echo "Restarting Whisper API server..."
+    notify "system-reboot" "Restarting Whisper server..." "normal"
+    stop_server
+    sleep 1
+    if start_server; then
+        notify "emblem-ok" "Server restarted" "normal"
+        echo "Server restarted successfully"
+    else
+        notify "dialog-error" "Failed to restart server" "critical"
+        echo "Failed to restart server"
+        return 1
+    fi
+}
+
+cmd_reset() {
+    cleanup_stale_processes
+    
+    # Stop recording if active
+    if [[ -f "$PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+        if [[ -n "$pid" ]] && is_process_running "$pid"; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    fi
+    
+    # Stop server
+    stop_server
+    
+    # Clean runtime state files
+    rm -f "$STATE_FILE" "$PID_FILE" "$SERVER_PID_FILE" "$SERVER_LOG" "$AUDIO_FILE" 2>/dev/null || true
+    
+    # Reinitialize as idle
+    set_state "idle"
+    
+    notify "emblem-ok" "STT reset complete" "normal"
+    echo "STT system reset to idle state"
+}
+
+cmd_list_mics() {
+    list_input_devices
+}
+
+cmd_select_mic() {
+    select_mic "${1:-}"
+}
+
+cmd_help() {
+    cat <<EOF
+$SCRIPT_NAME v$VERSION - Hyprland Speech-to-Text Client
+
+Usage: $SCRIPT_NAME <command>
+
+Commands:
+  toggle        Start/stop recording (default)
+  start         Start recording
+  stop          Stop and transcribe
+  status        JSON status for Waybar
+  list-mics     List all available audio input devices
+  select-mic    Select audio input device (interactive or by number)
+  help          Show this help
+
+Server Management (use whisper-ctl):
+  whisper-ctl start         Start server, load model
+  whisper-ctl stop          Stop server, free VRAM
+  whisper-ctl restart       Restart server
+  whisper-ctl status        Show server status
+  whisper-ctl waybar       Waybar JSON output
+
+Environment Variables:
+  HYPR_STT_API_URL      API endpoint URL
+  HYPR_STT_MODEL        Whisper model (tiny/base/small/medium/large-v3)
+  HYPR_STT_PORT         API server port
+  HYPR_STT_LANGUAGE     Language code (en/es/fr/de/hi/zh/ja/ko)
+
+Examples:
+  $SCRIPT_NAME toggle       # Toggle recording
+  $SCRIPT_NAME list-mics    # Show available microphones
+  $SCRIPT_NAME select-mic   # Interactively select mic
+  $SCRIPT_NAME select-mic 2 # Select device #2
+  $SCRIPT_NAME stop-server  # Stop server, free VRAM
+  $SCRIPT_NAME start-server # Start server
+
+Hyprland Keybindings (~/.config/hypr/hyprland.conf):
+  SUPER + N          Toggle voice recording
+  SUPER + ALT + R    Stop server (free VRAM)
+  SUPER + SHIFT + S  Start server
+  SUPER + SHIFT + R  Restart server
+  SUPER + CTRL + R   Reset STT state
+
+Server Management:
+  Start:  ~/.local/bin/hypr-stt start-server
+  Stop:   ~/.local/bin/hypr-stt stop-server
+  Status: ~/.local/bin/whisper-ctl status
+
+Integration Guide:
+  See README.md or https://github.com/yourusername/whisper-stt for
+  documentation on integrating with OpenWebUI, Waybar, and other tools.
+
+EOF
+}
+
+# =============================================================================
+# Entry Point
+# =============================================================================
+
+main() {
+    init
+    
+    local command="${1:-toggle}"
+    
+    case "$command" in
+        toggle)
+            cmd_toggle
+            ;;
+        start)
+            cmd_start
+            ;;
+        stop)
+            cmd_stop
+            ;;
+        status)
+            cmd_status
+            ;;
+        stop-server)
+            cmd_stop_server
+            ;;
+        start-server)
+            cmd_start_server
+            ;;
+        restart-server)
+            cmd_restart_server
+            ;;
+        reset)
+            cmd_reset
+            ;;
+        list-mics)
+            cmd_list_mics
+            ;;
+        select-mic)
+            cmd_select_mic "${2:-}"
+            ;;
+        help|--help|-h)
+            cmd_help
+            ;;
+        *)
+            echo "Unknown command: $command" >&2
+            echo "Run '$SCRIPT_NAME help' for usage." >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
