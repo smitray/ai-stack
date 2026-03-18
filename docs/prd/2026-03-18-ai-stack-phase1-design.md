@@ -37,7 +37,7 @@ The stack is designed for a single user on a single machine with constrained har
 
 | Service | Deployment | Port | GPU | Purpose |
 |---------|-----------|------|-----|---------|
-| **Whisper STT** | Bare metal | 7861 | Yes (~826 MiB) | Speech-to-text via Faster-Whisper |
+| **Whisper STT** | Bare metal | 7861 | Yes (~1.5-2 GB) | Speech-to-text via Faster-Whisper (large-v3-turbo) |
 | **llama.cpp** | Bare metal | 8080 | Yes (~2-3.5 GB) | Local LLM inference server |
 | **LiteLLM** | Podman | 4000 | No | API gateway routing local + cloud LLMs |
 | **Open WebUI** | Podman | 3000 | No | Chat UI, RAG, web search |
@@ -115,25 +115,30 @@ All `depends_on` entries use `condition: service_healthy` unless noted. This pre
 
 ### 4.1 Bare Metal Layer
 
-#### Whisper STT (existing, to be captured)
+#### Whisper STT (rewritten for quality)
 
-Already deployed and working. The ai-stack repo captures the existing POC code in `bare-metal/stt/poc/` and will create clean, automated install scripts.
+The ai-stack repo implements a production-quality STT service with proper architecture (FastAPI + Pydantic + structured logging).
+
+**Model:** `deepdml/faster-whisper-large-v3-turbo-ct2` (chosen for accuracy - fixes word skipping issues)
 
 **Key components:**
-- `whisper-api-server` -- Python entry point (Faster-Whisper + OpenAI-compatible API)
-- `hypr-stt` -- Bash client (toggle recording, auto-start server)
-- `whisper-ctl` -- Bash server management CLI
-- `whisper-idle-monitor.sh` -- Auto-unloads model after 10 min idle
+- `whisper_stt` Python package (`src/whisper_stt/`)
+  - `server.py` -- FastAPI application with OpenAI-compatible API
+  - `service.py` -- Transcription orchestration logic
+  - `config.py` -- YAML config with environment overrides
+  - `models.py` -- Pydantic schemas for request/response validation
+- `whisper-client` -- Unified bash CLI (merged hypr-stt + whisper-ctl functionality)
+- `idle-monitor.sh` -- Auto-unloads model after 10 min idle
 - systemd user services for lifecycle management
 
 **VRAM lifecycle:**
 ```
-Idle (0 MiB) → Super+N pressed → model loads (826 MiB) → transcribes → idle 10 min → unloads (0 MiB)
+Idle (0 MiB) → Super+N pressed → model loads (~1.5-2 GB) → transcribes → idle 10 min → unloads (0 MiB)
 ```
 
 **Systemd service config:**
 - `Restart=on-failure`, `RestartSec=5s`
-- No watchdog (removed per Issue #3 in STT docs)
+- No watchdog
 
 #### llama.cpp (new)
 
@@ -501,12 +506,14 @@ Note: The embedding model (`nomic-embed-text-v1.5`) runs inside the Open WebUI c
 
 ### 10.2 VRAM Budget
 
-| State | Used | Free |
-|-------|------|------|
-| All idle | 26 MiB | 4070 MiB |
-| STT loaded | 826 MiB | 3270 MiB |
-| LLM loaded (3B Q4_K_M) | ~2500 MiB | ~1570 MiB |
-| LLM loaded (7B Q3_K_S) | ~3500 MiB | ~570 MiB |
+| State | Used | Free | Notes |
+|-------|------|------|-------|
+| All idle | 26 MiB | 4070 MiB | Baseline |
+| STT loaded (large-v3-turbo) | ~1500-2000 MiB | ~2070-2570 MiB | Enough for 3B LLM at Q4_K_M |
+| LLM loaded (3B Q4_K_M) | ~2500 MiB | ~1570 MiB | Not enough for STT |
+| LLM loaded (7B Q3_K_S) | ~3500 MiB | ~570 MiB | No coexistence possible |
+
+**Coexistence:** STT + 3B LLM might fit together (~4-4.5 GB needed), but 7B models are mutually exclusive with STT.
 
 ---
 
