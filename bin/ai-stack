@@ -79,8 +79,103 @@ case "$COMMAND" in
                 ;;
         esac
         ;;
+    models)
+        source ~/.env 2>/dev/null || true
+        case "$1" in
+            list)
+                echo "=== Downloaded Models (HF Cache) ==="
+                if command -v hf &>/dev/null; then
+                    hf cache ls
+                else
+                    echo "HF CLI not installed. Run: pip install -U huggingface_hub[cli]"
+                    exit 1
+                fi
+                ;;
+            status)
+                echo "=== Model Download Status ==="
+                echo ""
+                echo "STT Model: deepdml/faster-whisper-large-v3-turbo-ct2"
+                if [ -d "$HOME/.cache/huggingface/hub/models--deepdml--faster-whisper-large-v3-turbo-ct2" ]; then
+                    echo "  Status: Downloaded"
+                else
+                    echo "  Status: Not downloaded"
+                fi
+                echo ""
+                echo "LLM Model: unsloth/Qwen3.5-4B-GGUF:Q4_K_M"
+                if [ -d "$HOME/.cache/huggingface/hub/models--unsloth--Qwen3.5-4B-GGUF" ]; then
+                    echo "  Status: Downloaded"
+                else
+                    echo "  Status: Not downloaded"
+                fi
+                ;;
+            download)
+                if [ -z "$2" ]; then
+                    echo "Usage: ai-stack models download <hf-repo>"
+                    echo "Examples:"
+                    echo "  ai-stack models download deepdml/faster-whisper-large-v3-turbo-ct2"
+                    echo "  ai-stack models download unsloth/Qwen3.5-4B-GGUF:Q4_K_M"
+                    exit 1
+                fi
+                if ! command -v hf &>/dev/null; then
+                    echo "Installing HuggingFace CLI..."
+                    pip install -U "huggingface_hub[cli]" --quiet
+                fi
+                if [ -n "$HF_TOKEN" ]; then
+                    hf auth login --token "$HF_TOKEN" || true
+                fi
+                echo "Downloading $2..."
+                hf download "$2"
+                echo "Download complete!"
+                ;;
+            add-llama)
+                if [ -z "$2" ] || [ -z "$3" ]; then
+                    echo "Usage: ai-stack models add-llama <name> <hf-repo> [--ctx-size 4096]"
+                    echo "Example:"
+                    echo "  ai-stack models add-llama qwen-3b-chat unsloth/Qwen3.5-4B-GGUF:Q4_K_M"
+                    exit 1
+                fi
+                CONFIG_DIR="${AI_STACK_CONFIG_DIR:-$HOME/.config/ai-stack}/llama-cpp"
+                PRESETS_FILE="$CONFIG_DIR/presets.ini"
+                if [ ! -f "$PRESETS_FILE" ]; then
+                    echo "Error: presets.ini not found. Run: ai-stack install llama-cpp"
+                    exit 1
+                fi
+                NAME="$2"
+                HF_REPO="$3"
+                CTX_SIZE="${4:-4096}"
+                echo "Adding model to presets.ini: $NAME"
+                cat >> "$PRESETS_FILE" << EOF
+
+[$NAME]
+hf-repo = $HF_REPO
+ctx-size = $CTX_SIZE
+EOF
+                echo "Model added. Restart llama-cpp to load."
+                ;;
+            cleanup)
+                if [ "$2" = "--dry-run" ]; then
+                    echo "Dry run - no changes"
+                    hf cache prune --dry-run 2>/dev/null || hf cache ls
+                else
+                    echo "Cleaning up HF cache..."
+                    hf cache prune
+                fi
+                ;;
+            *)
+                echo "Usage: ai-stack models {list|status|download|add-llama|cleanup}"
+                echo ""
+                echo "Commands:"
+                echo "  list                    - List downloaded models"
+                echo "  status                  - Check model download status"
+                echo "  download <repo>         - Download specific model"
+                echo "  add-llama <n> <repo>    - Add llama.cpp model to presets"
+                echo "  cleanup [--dry-run]     - Cleanup HF cache"
+                exit 1
+                ;;
+        esac
+        ;;
     *)
-        echo "Usage: ai-stack {up|down|restart|status|logs|gpu|install}"
+        echo "Usage: ai-stack {up|down|restart|status|logs|gpu|install|models}"
         exit 1
         ;;
 esac
