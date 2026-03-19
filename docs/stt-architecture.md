@@ -79,6 +79,24 @@ bare-metal/stt/
 
 ## 5. Configuration
 
+### Hugging Face Cache Integration
+
+The STT service uses Hugging Face's cache system as the single source of truth for model storage:
+
+```bash
+# Download model once (uses HF_TOKEN from ~/.env)
+hf download deepdml/faster-whisper-large-v3-turbo-ct2
+
+# Model cached at: ~/.cache/huggingface/hub/models--deepdml--faster-whisper-large-v3-turbo-ct2/
+# faster-whisper automatically loads from HF cache - no path configuration needed
+```
+
+**Benefits:**
+- Single download, used everywhere
+- Automatic version management
+- Cache inspection via `hf cache ls`
+- No manual path management
+
 ### config.yaml
 
 ```yaml
@@ -91,7 +109,8 @@ model:
   name: "deepdml/faster-whisper-large-v3-turbo-ct2"
   device: "auto"
   compute_type: "float16"
-  download_path: "/srv/llama-cpp/models"
+  # No download_path - uses Hugging Face cache automatically
+  # Model downloaded via: hf download deepdml/faster-whisper-large-v3-turbo-ct2
 
 gpu:
   min_vram_mb: 1500
