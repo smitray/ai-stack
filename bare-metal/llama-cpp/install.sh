@@ -6,6 +6,21 @@ source ~/.env
 
 echo "Installing llama.cpp with optimizations..."
 
+# Ensure HF CLI is installed
+if ! command -v hf &>/dev/null; then
+    echo "Installing HuggingFace CLI..."
+    pip install -U "huggingface_hub[cli]" --quiet
+fi
+
+# Authenticate with HF if token is set
+if [ -n "$HF_TOKEN" ] && [ "$HF_TOKEN" != "your_token_here" ]; then
+    echo "Authenticating with HuggingFace..."
+    hf auth login --token "$HF_TOKEN" || true
+    
+    echo "Downloading default LLM model to HF cache..."
+    hf download unsloth/Qwen3.5-4B-GGUF Q4_K_M.gguf || true
+fi
+
 # Create dirs
 mkdir -p "$AI_STACK_CONFIG_DIR/llama-cpp"
 mkdir -p "$AI_STACK_DATA_DIR/llama-cpp"
