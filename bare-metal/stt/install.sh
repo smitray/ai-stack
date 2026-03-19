@@ -6,6 +6,21 @@ source ~/.env
 
 echo "Setting up Whisper STT..."
 
+# Ensure HF CLI is installed
+if ! command -v hf &>/dev/null; then
+    echo "Installing HuggingFace CLI..."
+    pip install -U "huggingface_hub[cli]" --quiet
+fi
+
+# Authenticate with HF if token is set
+if [ -n "$HF_TOKEN" ] && [ "$HF_TOKEN" != "your_token_here" ]; then
+    echo "Authenticating with HuggingFace..."
+    hf auth login --token "$HF_TOKEN" || true
+    
+    echo "Downloading STT model to HF cache..."
+    hf download deepdml/faster-whisper-large-v3-turbo-ct2 || true
+fi
+
 # Create directories
 mkdir -p "$AI_STACK_CONFIG_DIR/stt"
 mkdir -p "$AI_STACK_DATA_DIR/stt"
