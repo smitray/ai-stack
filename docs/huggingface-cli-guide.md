@@ -53,7 +53,7 @@ hf download unsloth/Qwen3.5-4B-GGUF
 ### Download with Custom Cache
 
 ```bash
-hf download deepdml/faster-whisper-large-v3-turbo-ct2 --cache-dir /srv/llama-cpp/models
+hf download deepdml/faster-whisper-large-v3-turbo-ct2
 ```
 
 ## Cache Management
@@ -115,7 +115,7 @@ model = WhisperModel("deepdml/faster-whisper-large-v3-turbo-ct2")
 llama-server -hf unsloth/Qwen3.5-4B-GGUF:Q4_K_M
 
 # Or use cached path directly
-llama-server -m ~/.cache/llama.cpp/models--unsloth--Qwen3.5-4B-GGUF/Q4_K_M.gguf
+llama-server -m ~/.cache/huggingface/hub/models--unsloth--Qwen3.5-4B-GGUF/snapshots/*/Q4_K_M.gguf
 ```
 
 ## Environment Variables Reference

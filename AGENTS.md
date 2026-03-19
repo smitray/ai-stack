@@ -90,16 +90,39 @@ nvidia-smi --query-gpu=memory.used,memory.free --format=csv
 
 ## Model Downloads
 
-Models are downloaded via Hugging Face. Set `HF_TOKEN` in `~/.env`:
+Models are downloaded via Hugging Face CLI to the central HF cache. Set `HF_TOKEN` in `~/.env`:
 ```bash
 HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-| Service | Model | Location |
-|---------|-------|----------|
-| STT | `deepdml/faster-whisper-large-v3-turbo-ct2` | `/srv/llama-cpp/models` |
-| LLM | Qwen2.5-3B-Instruct-Q4_K_M.gguf | `/srv/llama-cpp/models` |
-| Embedding | `nomic-ai/nomic-embed-text-v1.5` | HuggingFace (auto-download) |
+### HF Cache Location
+All models are stored in: `~/.cache/huggingface/hub/`
+
+### Download Commands
+```bash
+# Install HF CLI
+pip install -U huggingface_hub[cli]
+
+# Authenticate
+hf auth login --token $HF_TOKEN
+
+# Download STT model
+hf download deepdml/faster-whisper-large-v3-turbo-ct2
+
+# Download LLM model
+hf download unsloth/Qwen3.5-4B-GGUF Q4_K_M.gguf
+
+# Check cache
+hf cache ls
+```
+
+### Model Reference
+
+| Service | Model | VRAM | Cache Path |
+|---------|-------|------|------------|
+| STT | `deepdml/faster-whisper-large-v3-turbo-ct2` | ~1.5-2 GB | `~/.cache/huggingface/hub/models--deepdml--faster-whisper-large-v3-turbo-ct2/` |
+| LLM | `unsloth/Qwen3.5-4B-GGUF` (Q4_K_M) | ~2-2.5 GB | `~/.cache/huggingface/hub/models--unsloth--Qwen3.5-4B-GGUF/` |
+| Embedding | `nomic-ai/nomic-embed-text-v1.5` | ~400 MB | Auto-download by Open WebUI |
 
 ## Troubleshooting
 

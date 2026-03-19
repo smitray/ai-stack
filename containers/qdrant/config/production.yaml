@@ -1,2 +1,11 @@
 storage:
   on_disk_payload: true
+
+service:
+  host: 0.0.0.0
+  http_port: 6333
+  grpc_port: 6334
+  api_key: ${QDRANT_API_KEY:-}  # Set in ~/.env for production
+
+cluster:
+  enabled: false  # Single-node for Phase 1

@@ -156,7 +156,7 @@ Built from source with CUDA support targeting sm_86 (RTX 3050 Ampere).
 **Model strategy:**
 - 3B models (Qwen2.5-3B, etc.) at Q4_K_M: ~2.0-2.5 GB VRAM, 4K context
 - 7B models at Q3_K_S with KV quant: ~3.0-3.5 GB VRAM, 2K context
-- Models stored at `/srv/llama-cpp/models/` (persistent across OS reinstalls, NVMe 1)
+- Models stored at `~/.cache/huggingface/hub/` (HF cache, persistent across OS reinstalls)
 
 **VRAM lifecycle:**
 ```
@@ -446,7 +446,7 @@ OPENWEBUI_DATABASE_URL=postgresql://openwebui:${OPENWEBUI_DB_PASSWORD}@postgres:
 # === Paths (XDG defaults, overridable) ===
 AI_STACK_DATA_DIR=${XDG_DATA_HOME:-$HOME/.local/share}/ai-stack
 AI_STACK_CONFIG_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack
-AI_STACK_MODELS_DIR=/srv/llama-cpp/models
+AI_STACK_MODELS_DIR=${HOME}/.cache/huggingface/hub
 ```
 
 **Loading strategy:**

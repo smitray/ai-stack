@@ -1,9 +1,11 @@
 model_list:
+  # Local LLM (llama.cpp on bare-metal)
   - model_name: local-llama
     litellm_params:
       model: openai/local-llama
       api_base: http://host.containers.internal:8080/v1
       api_key: sk-no-key-required
+  # Cloud fallbacks
   - model_name: gemini-pro
     litellm_params:
       model: gemini/gemini-pro
@@ -30,6 +32,12 @@ litellm_settings:
     host: valkey
     port: 6379
     db: 1
+  # Fallback: local → cloud
+  fallbacks:
+    - local-llama: [gemini-pro, groq-llama-3]
+  # Context window fallback
+  context_window_fallbacks:
+    - local-llama: [gemini-pro]
 
 router_settings:
   allowed_fails: 3

@@ -5,13 +5,21 @@ After=network.target
 [Service]
 Type=simple
 EnvironmentFile=%h/.env
+
+# Build with CUDA, LTO, and RTX 3050 architecture (sm_86)
+# Uses -hf flag for auto-download from HuggingFace
 ExecStart=%h/.local/share/ai-stack/llama-cpp/llama.cpp/build/bin/llama-server \
-    --host 127.0.0.1 --port 8080 \
-    --models-preset %h/.config/ai-stack/llama-cpp/presets.ini \
-    --models-max 1 \
+    -hf unsloth/Qwen3.5-4B-GGUF:Q4_K_M \
+    --host 127.0.0.1 \
+    --port 8080 \
+    --metrics \
     --sleep-idle-seconds 300
+
 Restart=on-failure
 RestartSec=5s
+
+# Allow higher priority for inference
+Nice=-5
 
 [Install]
 WantedBy=default.target

@@ -106,7 +106,6 @@ class ModelConfig:
     name: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
     device: str = "auto"  # auto, cuda, cpu
     compute_type: str = "float16"
-    download_path: str = "/srv/llama-cpp/models"
 
 
 @dataclass
@@ -1054,7 +1053,6 @@ model:
   name: "deepdml/faster-whisper-large-v3-turbo-ct2"
   device: "auto"
   compute_type: "float16"
-  download_path: "/srv/llama-cpp/models"
 
 gpu:
   min_vram_mb: 1500

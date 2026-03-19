@@ -25,13 +25,44 @@ if ! grep -q "nvidia-container-runtime" /etc/containers/containers.conf 2>/dev/n
     systemctl --user restart podman.socket || true
 fi
 
-# 3. Setup ~/.env
+# 3. Install HuggingFace CLI (for model management)
+echo "Installing HuggingFace CLI..."
+if command -v pip &>/dev/null; then
+    pip install -U "huggingface_hub[cli]" --quiet
+elif command -v pipx &>/dev/null; then
+    pipx install huggingface_hub
+fi
+
+# 4. Setup ~/.env
 if [ ! -f "$HOME/.env" ]; then
     echo "Creating ~/.env from template. Please fill in your API keys."
     cp .env.example "$HOME/.env"
 fi
 
-# 4. Inject into ~/.zshrc
+# Source environment for subsequent steps
+if [ -f "$HOME/.env" ]; then
+    source "$HOME/.env"
+fi
+
+# 5. Download Models to HF Cache
+if [ -n "$HF_TOKEN" ]; then
+    echo "Authenticating with HuggingFace..."
+    hf auth login --token "$HF_TOKEN" || true
+
+    echo "Downloading STT model to HF cache..."
+    hf download deepdml/faster-whisper-large-v3-turbo-ct2 || true
+
+    echo "Downloading LLM model to HF cache..."
+    hf download unsloth/Qwen3.5-4B-GGUF Q4_K_M.gguf || true
+
+    echo "Verifying cache..."
+    hf cache ls
+else
+    echo "WARNING: HF_TOKEN not set. Models will be downloaded on first use."
+    echo "Set HF_TOKEN in ~/.env to download models now."
+fi
+
+# 6. Inject into ~/.zshrc
 ZSHRC="$HOME/.zshrc"
 if [ -f "$ZSHRC" ]; then
     if ! grep -q "source ~/.env" "$ZSHRC"; then
@@ -42,4 +73,10 @@ if [ -f "$ZSHRC" ]; then
     fi
 fi
 
+echo ""
 echo "Bootstrap complete!"
+echo ""
+echo "Next steps:"
+echo "  1. Edit ~/.env and add your API keys"
+echo "  2. Run: ai-stack install all"
+echo ""

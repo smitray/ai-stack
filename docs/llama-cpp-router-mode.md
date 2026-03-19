@@ -25,20 +25,21 @@ llama.cpp server includes **router mode** - a built-in model management system t
 
 ## Quick Start
 
-### Basic Router (Auto-Discovery)
+### Simple Mode (Recommended)
 
 ```bash
-# Auto-discovers models from cache
+# Direct HF model loading - auto-downloads and caches
 llama-server \
+    -hf unsloth/Qwen3.5-4B-GGUF:Q4_K_M \
     --host 127.0.0.1 \
     --port 8080 \
-    --models-max 1
+    --sleep-idle-seconds 300
 ```
 
-### Router with Presets (Recommended)
+### Router with Presets (Advanced)
 
 ```bash
-# Use INI file for model definitions
+# Use INI file for multiple models
 llama-server \
     --host 127.0.0.1 \
     --port 8080 \
@@ -49,7 +50,7 @@ llama-server \
 
 ## Presets INI File Format
 
-### Example: Single Model Configuration
+### Example: Single Model with HF Auto-Download
 
 ```ini
 [*]
@@ -61,8 +62,8 @@ cache-type-k = q4_0
 cache-type-v = q4_0
 
 [qwen-3b]
-# Section name = model name for API calls
-model = ~/.cache/llama.cpp/models--unsloth--Qwen3.5-4B-GGUF/Q4_K_M.gguf
+# HF repo with quantization tag - auto-downloads on first use
+hf-repo = unsloth/Qwen3.5-4B-GGUF:Q4_K_M
 load-on-startup = true  # Pre-load on server start
 ```
 
@@ -77,15 +78,15 @@ flash-attn = on
 sleep-idle-seconds = 300
 
 [qwen-3b-chat]
-model = ~/.cache/llama.cpp/models--unsloth--Qwen3.5-4B-GGUF/Q4_K_M.gguf
+hf-repo = unsloth/Qwen3.5-4B-GGUF:Q4_K_M
 chat-template = qwen
 
 [qwen-3b-code]
-model = ~/.cache/llama.cpp/models--Qwen--Qwen2.5-Coder-3B-Instruct-GGUF/Q4_K_M.gguf
+hf-repo = Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M
 chat-template = qwen
 
 [phi-4-mini]
-model = ~/.cache/llama.cpp/models--Mungert--Phi-4-mini-reasoning-GGUF/Q4_K_M.gguf
+hf-repo = Mungert/Phi-4-mini-reasoning-GGUF:Q4_K_M
 chat-template = phi
 ```
 
@@ -93,7 +94,8 @@ chat-template = phi
 
 | Key | CLI Equivalent | Description |
 |-----|---------------|-------------|
-| `model` | `-m` | Path to GGUF file |
+| `hf-repo` | `-hf` | HuggingFace repo in format `user/model:quant` |
+| `model` | `-m` | Path to GGUF file (alternative to hf-repo) |
 | `n-gpu-layers` | `-ngl` | GPU layers to offload |
 | `ctx-size` | `-c` | Context window size |
 | `flash-attn` | `--flash-attn` | Enable flash attention |
@@ -195,6 +197,30 @@ curl -X POST http://localhost:8080/models/unload
 
 ## Systemd Service Configuration
 
+### Simple Mode (HF Auto-Download)
+
+```ini
+[Unit]
+Description=llama.cpp Server
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.env
+ExecStart=%h/.local/share/ai-stack/llama-cpp/llama-server \
+    -hf unsloth/Qwen3.5-4B-GGUF:Q4_K_M \
+    --host 127.0.0.1 \
+    --port 8080 \
+    --sleep-idle-seconds 300
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
+```
+
+### Router Mode (Multiple Models)
+
 ```ini
 [Unit]
 Description=llama.cpp Router Server
@@ -240,11 +266,11 @@ LiteLLM handles fallback automatically:
 ### Model Not Loading
 
 ```bash
-# Check if model file exists
-ls -la ~/.cache/llama.cpp/models--*
+# Check HF cache
+hf cache ls
 
-# Verify GGUF format
-file ~/.cache/llama.cpp/models--*/**/*.gguf
+# Verify model downloaded
+ls -la ~/.cache/huggingface/hub/models--unsloth--Qwen3.5-4B-GGUF/
 
 # Check llama.cpp logs
 journalctl --user -u llama-cpp -f
@@ -266,10 +292,10 @@ systemctl --user restart llama-cpp
 ### Slow Cold Start
 
 ```ini
-# Add to presets.ini
+# Add to presets.ini for pre-loading
 [qwen-3b]
-model = /path/to/model.gguf
-load-on-startup = true  # Pre-load on server start
+hf-repo = unsloth/Qwen3.5-4B-GGUF:Q4_K_M
+load-on-startup = true
 ```
 
 ## Best Practices
