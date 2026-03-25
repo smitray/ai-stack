@@ -140,3 +140,8 @@ vite.config.ts.timestamp-*
 
 # Git worktrees
 .worktrees/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
