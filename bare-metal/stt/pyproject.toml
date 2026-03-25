@@ -1,0 +1,28 @@
+[project]
+name = "whisper-stt"
+version = "1.0.0"
+description = "Whisper STT API server for local speech-to-text"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "faster-whisper>=1.0.0",
+    "ctranslate2>=4.0.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.25.0",
+]
+
+[project.scripts]
+whisper-stt = "whisper_stt.__main__:cli_entry"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
