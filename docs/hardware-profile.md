@@ -167,12 +167,13 @@ deviceQuery 2>&1 | grep "CUDA Capability"
 
 | Service | Reason |
 |---------|--------|
-| **LiteLLM** | CPU-bound API gateway, no GPU needed |
 | **Open WebUI** | Frontend + RAG (embedding on CPU) |
 | **PostgreSQL** | Database, CPU-only |
 | **Valkey** | Cache, CPU-only |
 | **Qdrant** | Vector DB, CPU-only |
 | **SearXNG** | Metasearch, CPU-only |
+
+**Note:** LiteLLM removed - Open WebUI connects directly to llama.cpp |
 
 ---
 

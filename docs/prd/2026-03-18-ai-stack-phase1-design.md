@@ -38,13 +38,12 @@ The stack is designed for a single user on a single machine with constrained har
 | Service | Deployment | Port | GPU | Purpose |
 |---------|-----------|------|-----|---------|
 | **Whisper STT** | Bare metal | 7861 | Yes (~1.5-2 GB) | Speech-to-text via Faster-Whisper (large-v3-turbo) |
-| **llama.cpp** | Bare metal | 8080 | Yes (~2-3.5 GB) | Local LLM inference server |
-| **LiteLLM** | Podman | 4000 | No | API gateway routing local + cloud LLMs |
-| **Open WebUI** | Podman | 3000 | No | Chat UI, RAG, web search |
+| **llama.cpp** | Bare metal | 8080 | Yes (~2-3.5 GB) | Local LLM inference server (OpenAI-compatible API) |
+| **Open WebUI** | Podman | 3000 | No | Chat UI, RAG, web search (connects directly to llama.cpp) |
 | **SearXNG** | Podman | 8888 | No | Privacy-respecting metasearch |
 | **Qdrant** | Podman | 6333 | No | Vector database for RAG |
 | **Valkey** | Podman | 6379 | No | Cache/rate-limiting (Redis-compatible) |
-| **PostgreSQL** | Podman | 5432 | No | Relational DB for LiteLLM + Open WebUI |
+| **PostgreSQL** | Podman | 5432 | No | Relational DB for Open WebUI |
 
 ### 3.2 Runtime Data Flow
 
@@ -67,25 +66,19 @@ Shows how data moves between services at runtime. This is **not** the compose st
      │  └──► PostgreSQL :5432 (chat history, user data)
      │
      ▼
-  ┌──────────┐
-  │ LiteLLM  │ :4000
-  │ (Gateway)│
-  └──┬──┬──┬─┘
-     │  │  │
-     │  │  └──► SearXNG :8888 (tool call web search)
-     │  │
-     │  └──► Cloud APIs (Gemini, Groq, OpenRouter, Anthropic)
-     │
-     └──► llama.cpp :8080 (bare metal, local LLM)
+   ┌──────────┐
+   │ llama.cpp│ :8080 (bare metal, local LLM)
+   └──────────┘
 
-  LiteLLM ──► PostgreSQL :5432 (spend tracking, virtual keys)
-  LiteLLM ──► Valkey :6379 (response cache, rate limiting)
-  SearXNG ──► Valkey :6379 (rate limiting)
+   SearXNG ──► Valkey :6379 (rate limiting)
+   Open WebUI ──► Valkey :6379 (caching)
 
   ┌─────────────┐
   │ Whisper STT │ :7861  (bare metal, independent, keybind-triggered)
   └─────────────┘
 ```
+
+**Note:** Open WebUI connects directly to llama.cpp at `localhost:8080/v1`. No LiteLLM gateway - VRAM orchestration handled by `ai-stack gpu` commands and idle timeouts.
 
 ### 3.3 Compose Startup Order & Health Checks
 
@@ -98,10 +91,9 @@ Podman compose `depends_on` with health check conditions:
 
 **Tier 2 -- Depend on Tier 1:**
 - **SearXNG** -- depends on Valkey (`service_healthy`) for rate limiting; healthcheck: `curl -f http://localhost:8080/healthz`
-- **LiteLLM** -- depends on PostgreSQL (`service_healthy`), Valkey (`service_healthy`); healthcheck: `curl -f http://localhost:4000/health/liveliness`
 
 **Tier 3 -- Depend on Tier 2:**
-- **Open WebUI** -- depends on LiteLLM (`service_healthy`), PostgreSQL (`service_healthy`), Qdrant (`service_healthy`), SearXNG (`service_started`)
+- **Open WebUI** -- depends on PostgreSQL (`service_healthy`), Qdrant (`service_healthy`), SearXNG (`service_started`)
 
 All `depends_on` entries use `condition: service_healthy` unless noted. This prevents crash-loops from containers connecting to unready backends.
 
@@ -160,7 +152,7 @@ Built from source with CUDA support targeting sm_86 (RTX 3050 Ampere).
 
 **VRAM lifecycle:**
 ```
-Idle (0 MiB) → LLM request via LiteLLM → model loads (~2-3 GB) → serves → idle 5 min → unloads (0 MiB)
+Idle (0 MiB) → Open WebUI request → model loads (~2-3 GB) → serves → idle 5 min → unloads (0 MiB)
 ```
 
 ### 4.2 Container Layer
@@ -177,34 +169,14 @@ All containerized services run in a single Podman pod via `podman compose`, shar
 | Valkey | 384m |
 | Qdrant | 512m |
 | SearXNG | 256m |
-| LiteLLM | 512m |
 | Open WebUI | 1g |
-
-#### LiteLLM (API Gateway)
-
-Central routing layer. All consumers talk to `localhost:4000`, never directly to providers.
-
-**Capabilities:**
-- Routes between local llama.cpp and cloud APIs (Anthropic, OpenAI, Google Gemini, Groq, OpenRouter)
-- Fallback: local → cloud when local is unavailable (VRAM occupied by STT)
-- Per-provider rate limiting (TPM/RPM)
-- Spend tracking via PostgreSQL
-- Virtual API keys
-- SearXNG web search integration (tool call interception)
-- Response caching via Valkey
-
-**Cloud providers configured:**
-- Google Gemini
-- Groq
-- OpenRouter
-- Anthropic
 
 #### Open WebUI (Chat Frontend)
 
-Single backend: LiteLLM at `localhost:4000/v1`. Model dropdown populated from LiteLLM's `/v1/models` endpoint.
+Direct connection to llama.cpp at `http://host.containers.internal:8080/v1`. Model dropdown shows available GGUF models from presets.ini.
 
 **Capabilities:**
-- Chat UI with model selection (all models from LiteLLM visible)
+- Chat UI with model selection
 - RAG via Qdrant (document upload → chunk → embed → semantic search)
 - Web search via SearXNG
 - Tool/function calling
@@ -225,7 +197,7 @@ Single backend: LiteLLM at `localhost:4000/v1`. Model dropdown populated from Li
 
 #### SearXNG (Search)
 
-Privacy-respecting metasearch. Used by both Open WebUI (UI-level search) and LiteLLM (API-level tool calls).
+Privacy-respecting metasearch. Used by Open WebUI for web search.
 
 **Engines enabled:** Google, DuckDuckGo, Wikipedia, GitHub, Stack Overflow, Arch Wiki.
 
@@ -241,14 +213,13 @@ Stores document embeddings for RAG. Open WebUI handles embedding generation; Qdr
 
 Multi-tenant cache using Redis database numbers:
 - DB 0: SearXNG rate limiting
-- DB 1: LiteLLM caching + rate limiting
+- DB 1: Open WebUI caching
 
 **Config:** `maxmemory 256mb`, `allkeys-lru` eviction, AOF persistence.
 
 #### PostgreSQL
 
-Shared relational database:
-- Database `litellm`: virtual keys, spend logs, rate limits
+Relational database:
 - Database `openwebui`: chat history, user data, settings
 
 **Image:** `postgres:17-alpine` (lightweight).
@@ -259,46 +230,40 @@ Shared relational database:
 
 ### 5.1 Mutual Exclusion Model
 
-STT and local LLM are mutually exclusive. The system enforces this through idle timeouts -- not an active orchestrator.
+STT and local LLM are mutually exclusive. The system enforces this through idle timeouts and manual switching via `ai-stack gpu`.
 
 | State | STT VRAM | LLM VRAM | Total | Available |
 |-------|----------|----------|-------|-----------|
 | Both idle | 0 MiB | 0 MiB | ~26 MiB | ~4070 MiB |
-| STT active | ~826 MiB | 0 MiB | ~826 MiB | ~3270 MiB |
+| STT active | ~1600 MiB | 0 MiB | ~1600 MiB | ~2470 MiB |
 | LLM active (3B) | 0 MiB | ~2500 MiB | ~2500 MiB | ~1570 MiB |
 | LLM active (7B) | 0 MiB | ~3500 MiB | ~3500 MiB | ~570 MiB |
 
 ### 5.2 Conflict Resolution
 
-When STT is loaded and a local LLM request arrives:
-1. llama-server attempts to allocate VRAM → fails (or fits if using small model)
-2. LiteLLM detects failure → marks local deployment as "cooled down"
-3. LiteLLM falls back to cloud API (e.g., Gemini, Groq)
-4. After cooldown period (default: 60s, configurable via `router_settings.cooldown_time`), LiteLLM retries local on next request
-5. Meanwhile, STT idle monitor unloads Whisper after 10 min
-6. Next local LLM request succeeds (VRAM free)
+Open WebUI connects directly to llama.cpp at `localhost:8080`. When STT is loaded and an LLM request arrives:
 
-**LiteLLM cooldown config:**
-```yaml
-router_settings:
-  allowed_fails: 3        # failures before cooldown
-  cooldown_time: 60        # seconds before retrying failed deployment
-  retry_policy:
-    TimeoutError: 2
-    InternalServerError: 3
-```
+1. llama.cpp cannot allocate VRAM → returns error
+2. Open WebUI shows error (no automatic fallback to cloud without LiteLLM)
+3. User manually switches: `ai-stack gpu llm` to stop STT, free VRAM
+4. Or waits for STT idle monitor to unload after 10 min
+5. Retry LLM request
 
-**This requires zero custom orchestration code.** LiteLLM's built-in fallback + llama-server's sleep-idle + STT's idle monitor handle everything.
+**This requires manual VRAM management via `ai-stack gpu` commands.**
 
 ### 5.3 Manual Override
 
 The `ai-stack` CLI provides explicit switching for when you want immediate control:
 ```bash
-ai-stack gpu stt    # Stops llama-server, starts STT
-ai-stack gpu llm    # Stops STT, starts llama-server
+ai-stack gpu stt    # Stops llama-cpp, starts whisper-server
+ai-stack gpu llm    # Stops whisper-server, starts llama-cpp
 ai-stack gpu off    # Stops both, frees all VRAM
 ai-stack gpu status # Shows what's loaded and VRAM usage
 ```
+
+**VRAM Lifecycle:**
+- **STT:** Idle (0 MiB) → keybind triggers → model loads (~1.6 GB) → transcribes → idle 10 min → unloads (0 MiB)
+- **LLM:** Idle (0 MiB) → request arrives → model loads (~2-2.5 GB) → serves → idle 5 min → unloads (0 MiB)
 
 ---
 

@@ -1,6 +1,7 @@
 # Valkey - Research Notes
 
-**Last Updated:** March 18, 2026
+**Last Updated:** March 19, 2026  
+**Note:** LiteLLM removed - updated roles
 
 ---
 
@@ -8,9 +9,10 @@
 
 Valkey is a Redis-compatible in-memory data store (fork of Redis OSS). In ai-stack, it serves **multiple roles**:
 
-1. **LiteLLM cache** -- API key caching, rate limiting, LLM response caching
-2. **SearXNG rate limiter** -- Bot protection and request rate limiting
-3. **Open WebUI session cache** -- Optional, for distributed state (single instance doesn't strictly need it)
+1. **SearXNG rate limiter** -- Bot protection and request rate limiting
+2. **Open WebUI cache** -- Response caching for better performance
+
+**Previously:** Also used by LiteLLM (removed) for API key caching, rate limiting, and LLM response caching.
 
 ---
 

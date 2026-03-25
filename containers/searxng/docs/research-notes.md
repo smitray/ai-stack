@@ -1,12 +1,15 @@
 # SearXNG - Research Notes
 
-**Last Updated:** March 18, 2026
+**Last Updated:** March 19, 2026  
+**Note:** LiteLLM removed - updated integration info
 
 ---
 
 ## Overview
 
-SearXNG is a privacy-respecting metasearch engine. In ai-stack, it serves as the **web search backend** for both Open WebUI (UI-level search) and LiteLLM (API-level tool calls).
+SearXNG is a privacy-respecting metasearch engine. In ai-stack, it serves as the **web search backend** for Open WebUI (UI-level search).
+
+**Previously:** Also used by LiteLLM (removed) for API-level tool calls.
 
 ---
 

@@ -1,12 +1,13 @@
 # Open WebUI - Research Notes
 
-**Last Updated:** March 18, 2026
+**Last Updated:** March 19, 2026  
+**Note:** Updated to connect directly to llama.cpp (LiteLLM removed)
 
 ---
 
 ## Overview
 
-Open WebUI is a self-hosted web interface for LLMs. In ai-stack, it serves as the **primary user-facing chat UI**, connecting exclusively to LiteLLM as its backend.
+Open WebUI is a self-hosted web interface for LLMs. In ai-stack, it serves as the **primary user-facing chat UI**, connecting directly to llama.cpp (bare-metal).
 
 ---
 
@@ -21,19 +22,15 @@ Three-tier:
 
 ## Integration with ai-stack
 
-### Backend Connection
+### Backend Connection (Updated)
 
-Open WebUI → LiteLLM (localhost:4000) → local llama.cpp OR cloud APIs
+Open WebUI connects directly to llama.cpp at `http://host.containers.internal:8080/v1` (via Podman network).
 
 ```
-OPENAI_API_BASE_URL=http://litellm:4000/v1
-OPENAI_API_KEY=${LITELLM_MASTER_KEY}
+OPENAI_API_BASE_URL=http://host.containers.internal:8080/v1
 ```
 
-- Open WebUI calls LiteLLM's `/v1/models` → gets all configured models
-- User picks model in dropdown → request routed through LiteLLM
-- No direct connection to llama.cpp or cloud APIs
-- No Ollama integration (not used)
+**Note:** Previously connected to LiteLLM (removed due to security concerns).
 
 ### Database
 
@@ -41,7 +38,7 @@ Two options:
 1. **SQLite** (default) -- stored in `/app/backend/data/webui.db`
 2. **PostgreSQL** (external) -- via `DATABASE_URL` env var
 
-**Decision:** Use PostgreSQL (shared with LiteLLM) to keep data persistent and avoid SQLite file management in containers.
+**Decision:** Use PostgreSQL for persistent chat history and user data.
 
 ### Vector Database (RAG)
 

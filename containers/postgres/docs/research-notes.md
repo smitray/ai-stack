@@ -1,12 +1,15 @@
 # PostgreSQL - Research Notes
 
-**Last Updated:** March 18, 2026
+**Last Updated:** March 19, 2026  
+**Note:** LiteLLM removed - PostgreSQL now only used for Open WebUI
 
 ---
 
 ## Overview
 
-PostgreSQL is the relational database for ai-stack. Not originally in the Phase 1 list, but **required by LiteLLM** for virtual keys, spend tracking, and user management. Also used by **Open WebUI** as an alternative to SQLite for chat history and user data.
+PostgreSQL is the relational database for ai-stack. Used by **Open WebUI** for chat history and user data.
+
+**Previously:** Also required by LiteLLM (removed) for virtual keys and spend tracking.
 
 ---
 

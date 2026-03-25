@@ -242,24 +242,30 @@ RestartSec=5s
 WantedBy=default.target
 ```
 
-## Integration with LiteLLM
+## Integration with Open WebUI (LiteLLM Removed)
 
-LiteLLM connects to llama.cpp router as a local OpenAI-compatible endpoint:
+**⚠️ Update:** LiteLLM has been removed from ai-stack due to security concerns. Open WebUI now connects directly to llama.cpp.
+
+### Direct Connection (Current)
 
 ```yaml
-# litellm-config.yaml
-model_list:
-  - model_name: local-llama
-    litellm_params:
-      model: openai/local-llama
-      api_base: http://host.containers.internal:8080/v1
-      api_key: sk-no-key-required
+# Open WebUI environment (in compose.yaml)
+OPENAI_API_BASE_URL=http://host.containers.internal:8080/v1
 ```
 
-LiteLLM handles fallback automatically:
-1. Request arrives → Try local llama.cpp
-2. If VRAM occupied (model loading/unloading) → Wait or fallback to cloud
-3. Cloud fallback: Gemini, Groq, OpenRouter, Anthropic
+Open WebUI connects directly to llama.cpp router at `http://host.containers.internal:8080/v1` (or `localhost:8080` from host).
+
+### Benefits
+- Simpler architecture (no middleware)
+- No dependency on external gateway
+- Full control over VRAM management via `ai-stack gpu`
+
+### Trade-offs
+- No automatic cloud fallback when VRAM is occupied
+- Manual VRAM management required: `ai-stack gpu stt` ↔ `ai-stack gpu llm`
+- No virtual API keys or spend tracking
+
+---
 
 ## Troubleshooting
 
