@@ -8,7 +8,8 @@ shift || true
 case "$COMMAND" in
     up)
         cd "$REPO_ROOT"
-        podman compose --env-file "${HOME}/.env" -f containers/compose.yaml up -d
+        if [ -f "$HOME/.zshenv" ]; then set -a; source "$HOME/.zshenv"; set +a; fi
+        podman compose -f containers/compose.yaml up -d
         ;;
     down)
         cd "$REPO_ROOT"
@@ -16,7 +17,8 @@ case "$COMMAND" in
         ;;
     restart)
         cd "$REPO_ROOT"
-        podman compose --env-file "${HOME}/.env" -f containers/compose.yaml restart "$@"
+        if [ -f "$HOME/.zshenv" ]; then set -a; source "$HOME/.zshenv"; set +a; fi
+        podman compose -f containers/compose.yaml restart "$@"
         ;;
     status)
         cd "$REPO_ROOT"
@@ -63,15 +65,17 @@ case "$COMMAND" in
                 bash bare-metal/llama-cpp/install.sh
                 ;;
             containers)
-                podman compose --env-file "${HOME}/.env" -f containers/compose.yaml pull
-                podman compose --env-file "${HOME}/.env" -f containers/compose.yaml up -d
+                if [ -f "$HOME/.zshenv" ]; then set -a; source "$HOME/.zshenv"; set +a; fi
+                podman compose -f containers/compose.yaml pull
+                podman compose -f containers/compose.yaml up -d
                 ;;
             all)
                 bash lib/install-base.sh
                 bash bare-metal/llama-cpp/install.sh
                 bash bare-metal/stt/install.sh
-                podman compose --env-file "${HOME}/.env" -f containers/compose.yaml pull
-                podman compose --env-file "${HOME}/.env" -f containers/compose.yaml up -d
+                if [ -f "$HOME/.zshenv" ]; then set -a; source "$HOME/.zshenv"; set +a; fi
+                podman compose -f containers/compose.yaml pull
+                podman compose -f containers/compose.yaml up -d
                 ;;
             *)
                 echo "Usage: ai-stack install {stt|llama-cpp|containers|all}"
@@ -80,7 +84,7 @@ case "$COMMAND" in
         esac
         ;;
     models)
-        source ~/.env 2>/dev/null || true
+        if [ -f "$HOME/.zshenv" ]; then set -a; source "$HOME/.zshenv"; set +a; fi
         case "$1" in
             list)
                 echo "=== Downloaded Models (HF Cache) ==="

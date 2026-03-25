@@ -4,14 +4,14 @@ After=network.target
 
 [Service]
 Type=simple
-EnvironmentFile=%h/.env
 
 # Build with CUDA, LTO, and RTX 3050 architecture (sm_86)
 # Uses -hf flag for auto-download from HuggingFace
-ExecStart=%h/.local/share/ai-stack/llama-cpp/llama.cpp/build/bin/llama-server \
+# Sources ~/.zshenv directly to get HF_TOKEN
+ExecStart=/bin/bash -c 'if [ -f %h/.zshenv ]; then set -a; source %h/.zshenv; set +a; fi && exec %h/.local/share/ai-stack/llama-cpp/llama.cpp/build/bin/llama-server \
     -hf unsloth/Qwen3.5-4B-GGUF:Q4_K_M \
     --host 127.0.0.1 \
-    --port 8080 \
+    --port 7865 \
     --metrics \
     --sleep-idle-seconds 300
 

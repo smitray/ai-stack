@@ -1,0 +1,30 @@
+endpoints:
+  local-llama:
+    base_url: "http://host.containers.internal:7865/v1"
+    api_key_env: null
+
+  groq:
+    base_url: "https://api.groq.com/openai/v1"
+    api_key_env: "GROQ_API_KEY"
+
+  nvidia:
+    base_url: "https://integrate.api.nvidia.com/v1"
+    api_key_env: "NVIDIA_API_KEY"
+
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
+
+models:
+  # The model requested by Open WebUI / n8n maps to an ordered list of fallback endpoints
+  qwen-3b-chat:
+    - endpoint: local-llama
+      upstream_model: qwen-3b-chat
+    - endpoint: groq
+      upstream_model: llama-3.1-8b-instant
+
+  kimi-2.5:
+    - endpoint: groq
+      upstream_model: llama-3.1-8b-instant
+    - endpoint: nvidia
+      upstream_model: meta/llama-3.1-8b-instruct

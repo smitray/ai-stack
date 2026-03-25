@@ -2,9 +2,10 @@ services:
   postgres:
     image: postgres:17-alpine
     container_name: postgres
-    env_file: ${HOME}/.env
     environment:
       - POSTGRES_USER=aistack
+      - POSTGRES_PASSWORD
+      - OPENWEBUI_DB_PASSWORD
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -48,11 +49,11 @@ services:
     image: searxng/searxng:latest
     container_name: searxng
     ports:
-      - "8888:8080"
+      - "7863:8080"
     volumes:
       - ./searxng/config:/etc/searxng:rw
     environment:
-      - BASE_URL=http://localhost:8888/
+      - BASE_URL=http://localhost:7863/
     depends_on:
       valkey:
         condition: service_healthy
@@ -64,18 +65,36 @@ services:
     mem_limit: 256m
     restart: unless-stopped
 
+  ai-router:
+    build:
+      context: ./ai-router
+    container_name: ai-router
+    ports:
+      - "7864:7864"
+    volumes:
+      - ./ai-router/config:/app/config:ro
+    environment:
+      - GROQ_API_KEY
+      - NVIDIA_API_KEY
+      - OPENROUTER_API_KEY
+      - ANTHROPIC_API_KEY
+      - ROUTER_CONFIG=/app/config/models.yaml
+    mem_limit: 256m
+    restart: unless-stopped
+
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: openwebui
     ports:
-      - "3000:8080"
-    env_file: ${HOME}/.env
+      - "7860:8080"
     environment:
       - WEBUI_AUTH=false
-      - OPENAI_API_BASE_URL=http://host.containers.internal:8080/v1
+      - OPENAI_API_BASE_URL=http://ai-router:7864/v1
       - RAG_EMBEDDING_ENGINE=
       - RAG_EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
       - RAG_EMBEDDING_BATCH_SIZE=26
+      - WEBUI_SECRET_KEY
+      - OPENWEBUI_DATABASE_URL
     volumes:
       - open-webui-data:/app/backend/data
     depends_on:
@@ -85,6 +104,24 @@ services:
         condition: service_healthy
       searxng:
         condition: service_started
+      ai-router:
+        condition: service_started
+    mem_limit: 1g
+    restart: unless-stopped
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    ports:
+      - "7862:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://localhost:7862/
+    volumes:
+      - n8n-data:/home/node/.n8n
     mem_limit: 1g
     restart: unless-stopped
 
@@ -94,3 +131,4 @@ volumes:
   qdrant-storage:
   qdrant-snapshots:
   open-webui-data:
+  n8n-data:
