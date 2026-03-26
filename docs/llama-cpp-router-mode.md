@@ -53,40 +53,45 @@ llama-server \
 ### Example: Single Model with HF Auto-Download
 
 ```ini
+version = 1
+
 [*]
 # Global defaults - applied to all models
 n-gpu-layers = 99
-ctx-size = 4096
+c = 4096
 flash-attn = on
 cache-type-k = q4_0
 cache-type-v = q4_0
+sleep-idle-seconds = 300
 
-[qwen-3b]
+[unsloth/Qwen3.5-4B-GGUF:Q4_K_M]
 # HF repo with quantization tag - auto-downloads on first use
-hf-repo = unsloth/Qwen3.5-4B-GGUF:Q4_K_M
-load-on-startup = true  # Pre-load on server start
+# Section name matches HF repo for clarity
+chat-template = qwen
+load-on-startup = true  # Pre-load on server start (preset-only option)
 ```
 
 ### Example: Multiple Models (One at a Time)
 
 ```ini
+version = 1
+
 [*]
 # Global defaults
 n-gpu-layers = 99
-ctx-size = 4096
+c = 4096
 flash-attn = on
 sleep-idle-seconds = 300
+cache-type-k = q4_0
+cache-type-v = q4_0
 
-[qwen-3b-chat]
-hf-repo = unsloth/Qwen3.5-4B-GGUF:Q4_K_M
+[unsloth/Qwen3.5-4B-GGUF:Q4_K_M]
 chat-template = qwen
 
-[qwen-3b-code]
-hf-repo = Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M
+[Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M]
 chat-template = qwen
 
-[phi-4-mini]
-hf-repo = Mungert/Phi-4-mini-reasoning-GGUF:Q4_K_M
+[Mungert/Phi-4-mini-reasoning-GGUF:Q4_K_M]
 chat-template = phi
 ```
 
@@ -94,16 +99,25 @@ chat-template = phi
 
 | Key | CLI Equivalent | Description |
 |-----|---------------|-------------|
+| `version` | (none) | **Required:** INI format version (use `1`) |
 | `hf-repo` | `-hf` | HuggingFace repo in format `user/model:quant` |
 | `model` | `-m` | Path to GGUF file (alternative to hf-repo) |
 | `n-gpu-layers` | `-ngl` | GPU layers to offload |
-| `ctx-size` | `-c` | Context window size |
+| `c` | `-c` | Context window size (shorthand for `ctx-size`) |
+| `ctx-size` | `-c` | Context window size (full name, also works) |
 | `flash-attn` | `--flash-attn` | Enable flash attention |
 | `cache-type-k` | `--cache-type-k` | KV cache quantization |
 | `cache-type-v` | `--cache-type-v` | KV cache quantization |
 | `chat-template` | `--chat-template` | Chat template name |
+| `jinja` | `--jinja` | Enable Jinja templating |
+| `model-draft` | `--model-draft` | Path to draft model for speculative decoding |
 | `load-on-startup` | (preset-only) | Pre-load model on start |
+| `stop-timeout` | (preset-only) | Timeout for stopping model (seconds) |
 | `sleep-idle-seconds` | `--sleep-idle-seconds` | Auto-unload timeout |
+
+**Note:** Section names can be:
+- HF repo format (recommended): `[unsloth/Qwen3.5-4B-GGUF:Q4_K_M]`
+- Custom name: `[qwen-3b-chat]` (requires `hf-repo` or `model` key inside)
 
 ## Command-Line Flags Reference
 
@@ -149,12 +163,14 @@ chat-template = phi
 ### Configuration for Your Hardware
 
 ```ini
+version = 1
+
 [*]
 # Critical settings for 4GB VRAM
 models-max = 1              # Only 1 model at a time
 sleep-idle-seconds = 300    # 5 min idle timeout
 n-gpu-layers = 99           # Full GPU offload
-ctx-size = 4096             # Reasonable context (adjust based on VRAM)
+c = 4096                    # Reasonable context (adjust based on VRAM)
 flash-attn = on             # Reduce VRAM for attention
 cache-type-k = q4_0         # Quantized KV cache (saves VRAM)
 cache-type-v = q4_0
@@ -298,9 +314,13 @@ systemctl --user restart llama-cpp
 ### Slow Cold Start
 
 ```ini
-# Add to presets.ini for pre-loading
-[qwen-3b]
-hf-repo = unsloth/Qwen3.5-4B-GGUF:Q4_K_M
+version = 1
+
+[*]
+sleep-idle-seconds = 300
+
+[unsloth/Qwen3.5-4B-GGUF:Q4_K_M]
+# Pre-load on server start to avoid cold start delay
 load-on-startup = true
 ```
 
