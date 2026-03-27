@@ -97,23 +97,42 @@ Open WebUI → STT Proxy (:7866) → ai-vram-manager logic
 
 ## Commands
 
-### VRAM Management
+### VRAM Management (via ai-stack CLI)
 
 ```bash
 # Check VRAM status
-ai-vram-manager status
+ai-stack vram status
 
 # Ensure ready for STT (unload LLM)
-ai-vram-manager ensure-stt
+ai-stack vram stt
 
 # Ensure ready for LLM (wait for STT)
-ai-vram-manager ensure-llm
+ai-stack vram llm
 
 # Show state file
-ai-vram-manager state
+ai-stack vram state
 
 # Clear state
-ai-vram-manager clear
+ai-stack vram clear
+
+# Show history
+ai-stack vram history
+```
+
+### GPU Mode Switching
+
+```bash
+# Switch to STT mode (with VRAM check)
+ai-stack gpu stt
+
+# Switch to LLM mode (with VRAM check)
+ai-stack gpu llm
+
+# Stop all GPU services
+ai-stack gpu off
+
+# Show GPU status
+ai-stack gpu status
 ```
 
 ### Management
@@ -176,8 +195,8 @@ systemctl --user status stt-proxy
 - `"active": "none"` - No active service
 
 **Used by:**
-- `ai-vram-manager` - Read/write state
-- `hypr-stt` - Writes via ai-vram-manager
+- `ai-stack vram` - Read/write state
+- `hypr-stt` - Writes via ai-stack vram
 - `STT Proxy` - Writes after unload
 - `llama.cpp` - Can check before loading LLM
 
@@ -198,7 +217,7 @@ hyprctl keybinds | grep stt
 hypr-stt toggle
 
 # Check VRAM status
-ai-vram-manager status
+ai-stack vram status
 ```
 
 ### Open WebUI STT not working
@@ -222,10 +241,10 @@ curl http://localhost:7866/health
 nvidia-smi
 
 # Check state
-ai-vram-manager status
+ai-stack vram state
 
 # Unload llama.cpp
-ai-vram-manager ensure-stt
+ai-stack vram stt
 # OR
 llama-router unload
 
@@ -238,10 +257,10 @@ ai-stack gpu llm   # For LLM
 
 ```bash
 # Check if STT is active
-ai-vram-manager state
+ai-stack vram state
 
 # If STT active, wait or clear
-ai-vram-manager ensure-llm  # Waits for STT to finish
+ai-stack vram llm  # Waits for STT to finish
 ```
 
 ---
@@ -250,7 +269,7 @@ ai-vram-manager ensure-llm  # Waits for STT to finish
 
 | Aspect | Hyprland Keybindings | Open WebUI |
 |--------|---------------------|------------|
-| **VRAM Management** | Automatic (ai-vram-manager) | Automatic (STT Proxy) |
+| **VRAM Management** | Automatic (ai-stack vram) | Automatic (STT Proxy) |
 | **Uses STT Proxy** | No | Yes |
 | **Endpoint** | Direct (:7861) | Proxy (:7866) |
 | **Scope** | System-wide | Open WebUI only |
