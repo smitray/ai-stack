@@ -33,20 +33,20 @@ case "$COMMAND" in
         case "$MODE" in
             stt)
                 systemctl --user stop llama-cpp || true
-                systemctl --user start whisper-api
+                systemctl --user start whisper-server
                 ;;
             llm)
-                systemctl --user stop whisper-api || true
+                systemctl --user stop whisper-server || true
                 systemctl --user start llama-cpp
                 ;;
             off)
-                systemctl --user stop whisper-api llama-cpp || true
+                systemctl --user stop whisper-server llama-cpp || true
                 ;;
             status)
                 echo "=== GPU VRAM Usage ==="
                 nvidia-smi --query-gpu=memory.used,memory.free --format=csv
                 echo -e "\n=== Systemd Status ==="
-                systemctl --user status whisper-api llama-cpp --no-pager || true
+                systemctl --user status whisper-server llama-cpp --no-pager || true
                 ;;
             *)
                 echo "Usage: ai-stack gpu {stt|llm|off|status}"

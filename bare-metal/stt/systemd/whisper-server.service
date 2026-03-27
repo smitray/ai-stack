@@ -4,12 +4,16 @@ After=network.target
 
 [Service]
 Type=simple
-EnvironmentFile=%h/.env
+EnvironmentFile=%h/.zshenv
 WorkingDirectory=%h/.local/share/ai-stack/stt
 ExecStart=%h/.local/share/ai-stack/stt/venv/bin/python -m whisper_stt \
     --config %h/.config/ai-stack/stt/config.yaml
 Restart=on-failure
 RestartSec=5s
+TimeoutStartSec=300
+
+# Start idle monitor after server is ready (wait for model load)
+ExecStartPost=/bin/sh -c 'sleep 15 && systemctl --user start whisper-idle-monitor.service &'
 
 [Install]
 WantedBy=default.target

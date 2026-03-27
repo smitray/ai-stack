@@ -1,11 +1,13 @@
 [Unit]
 Description=Whisper Idle Monitor
 After=whisper-server.service
+PartOf=whisper-server.service
 
 [Service]
 Type=simple
-EnvironmentFile=%h/.env
+EnvironmentFile=%h/.zshenv
 ExecStart=%h/.local/bin/whisper-idle-monitor.sh
+Restart=on-failure
 
 [Install]
 WantedBy=default.target

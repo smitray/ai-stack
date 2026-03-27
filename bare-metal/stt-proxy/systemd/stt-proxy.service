@@ -1,0 +1,14 @@
+[Unit]
+Description=STT Proxy for Open WebUI (VRAM Management)
+After=network.target whisper-server.service
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.zshenv
+WorkingDirectory=%h/.local/share/ai-stack/stt-proxy
+ExecStart=%h/.local/share/ai-stack/stt-proxy/venv/bin/python -m stt_proxy
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
