@@ -2,6 +2,11 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# VRAM Management URLs
+LLAMA_CPP_URL="${LLAMA_CPP_URL:-http://localhost:7865}"
+WHISPER_URL="${WHISPER_URL:-http://localhost:7861}"
+
 COMMAND=$1
 shift || true
 
@@ -32,24 +37,140 @@ case "$COMMAND" in
         MODE=$1
         case "$MODE" in
             stt)
+                # Switch to STT mode with VRAM check
+                ai-stack vram stt
                 systemctl --user stop llama-cpp || true
                 systemctl --user start whisper-server
                 ;;
             llm)
+                # Switch to LLM mode with VRAM check
+                ai-stack vram llm
                 systemctl --user stop whisper-server || true
                 systemctl --user start llama-cpp
                 ;;
             off)
                 systemctl --user stop whisper-server llama-cpp || true
+                ai-stack vram clear
                 ;;
             status)
-                echo "=== GPU VRAM Usage ==="
-                nvidia-smi --query-gpu=memory.used,memory.free --format=csv
-                echo -e "\n=== Systemd Status ==="
-                systemctl --user status whisper-server llama-cpp --no-pager || true
+                ai-stack vram status
                 ;;
             *)
                 echo "Usage: ai-stack gpu {stt|llm|off|status}"
+                exit 1
+                ;;
+        esac
+        ;;
+    vram)
+        # VRAM management commands
+        VRAM_ACTION="${1:-status}"
+        shift || true
+        
+        case "$VRAM_ACTION" in
+            stt)
+                # Ensure VRAM ready for STT (unload LLM)
+                echo "Checking VRAM for STT..."
+                loaded_model=$(curl -sf "$LLAMA_CPP_URL/models" 2>/dev/null | \
+                    jq -r '.data[]? | select(.status == "loaded") | .id' 2>/dev/null | head -1)
+                
+                if [[ -n "$loaded_model" ]]; then
+                    echo "LLM loaded ($loaded_model), unloading..."
+                    curl -sf -X POST "$LLAMA_CPP_URL/models/unload" \
+                        -H "Content-Type: application/json" \
+                        -d '{"model": "'$loaded_model'"}' >/dev/null 2>&1 || true
+                    sleep 1
+                    echo "✓ LLM unloaded"
+                else
+                    echo "✓ No LLM loaded"
+                fi
+                
+                # Write state
+                echo "{\"active\": \"stt\", \"timestamp\": $(date +%s)}" > \
+                    /run/user/$(id -u)/ai-stack-vram-state 2>/dev/null || true
+                echo "✓ VRAM ready for STT"
+                ;;
+            llm)
+                # Ensure VRAM ready for LLM (wait for STT)
+                echo "Checking VRAM for LLM..."
+                
+                # Check state file
+                if [[ -f /run/user/$(id -u)/ai-stack-vram-state ]]; then
+                    state=$(cat /run/user/$(id -u)/ai-stack-vram-state 2>/dev/null)
+                    active=$(echo "$state" | jq -r '.active' 2>/dev/null)
+                    timestamp=$(echo "$state" | jq -r '.timestamp' 2>/dev/null)
+                    elapsed=$(($(date +%s) - timestamp))
+                    
+                    if [[ "$active" == "stt" && $elapsed -lt 30 ]]; then
+                        echo "STT recently active (${elapsed}s ago), waiting..."
+                        sleep 2
+                    fi
+                fi
+                
+                # Write state
+                echo "{\"active\": \"llm\", \"timestamp\": $(date +%s)}" > \
+                    /run/user/$(id -u)/ai-stack-vram-state 2>/dev/null || true
+                echo "✓ VRAM ready for LLM"
+                ;;
+            status)
+                echo ""
+                echo "=== AI Stack VRAM Status ==="
+                echo ""
+                
+                # State file
+                if [[ -f /run/user/$(id -u)/ai-stack-vram-state ]]; then
+                    state=$(cat /run/user/$(id -u)/ai-stack-vram-state 2>/dev/null)
+                    active=$(echo "$state" | jq -r '.active' 2>/dev/null)
+                    timestamp=$(echo "$state" | jq -r '.timestamp' 2>/dev/null)
+                    elapsed=$(($(date +%s) - timestamp))
+                    echo "Active service: $active (${elapsed}s ago)"
+                else
+                    echo "Active service: none (no state file)"
+                fi
+                
+                # llama.cpp status
+                loaded_model=$(curl -sf "$LLAMA_CPP_URL/models" 2>/dev/null | \
+                    jq -r '.data[]? | select(.status == "loaded") | .id' 2>/dev/null | head -1)
+                if [[ -n "$loaded_model" ]]; then
+                    echo "LLM loaded: $loaded_model"
+                else
+                    echo "LLM: unloaded"
+                fi
+                
+                # Whisper status
+                if curl -sf "$WHISPER_URL/health" >/dev/null 2>&1; then
+                    echo "STT: healthy"
+                else
+                    echo "STT: not responding"
+                fi
+                
+                # VRAM usage
+                if command -v nvidia-smi &>/dev/null; then
+                    echo ""
+                    nvidia-smi --query-gpu=memory.used,memory.free --format=csv
+                fi
+                echo ""
+                ;;
+            state)
+                if [[ -f /run/user/$(id -u)/ai-stack-vram-state ]]; then
+                    cat /run/user/$(id -u)/ai-stack-vram-state | jq .
+                else
+                    echo "No state file found"
+                fi
+                ;;
+            clear)
+                rm -f /run/user/$(id -u)/ai-stack-vram-state 2>/dev/null || true
+                echo "✓ State cleared"
+                ;;
+            history)
+                if [[ -f /run/user/$(id -u)/ai-stack-vram-history.log ]]; then
+                    echo "=== VRAM Switch History ==="
+                    tail -20 /run/user/$(id -u)/ai-stack-vram-history.log
+                else
+                    echo "No history available"
+                fi
+                ;;
+            *)
+                echo "Usage: ai-stack vram {stt|llm|status|state|clear|history}"
                 exit 1
                 ;;
         esac
@@ -179,7 +300,47 @@ EOF
         esac
         ;;
     *)
-        echo "Usage: ai-stack {up|down|restart|status|logs|gpu|install|models}"
-        exit 1
+        cat <<EOF
+AI Stack Management CLI
+
+Usage: ai-stack <command> [options]
+
+Commands:
+  up              Start all containers
+  down            Stop all containers
+  restart         Restart containers
+  status          Show container status
+  logs            View container logs
+  gpu             GPU mode management (stt|llm|off|status)
+  vram            VRAM orchestration (stt|llm|status|state|clear|history)
+  install         Install components (stt|llama-cpp|containers|all|base)
+  models          Model management (list|status|download|add-llama|cleanup)
+  help            Show this help
+
+VRAM Commands:
+  ai-stack vram stt       - Unload LLM, prepare for STT
+  ai-stack vram llm       - Wait for STT, prepare for LLM
+  ai-stack vram status    - Show VRAM status (state + services + usage)
+  ai-stack vram state     - Show state file content
+  ai-stack vram clear     - Clear state file
+  ai-stack vram history   - Show VRAM switch history
+
+GPU Commands:
+  ai-stack gpu stt        - Switch to STT mode (with VRAM check)
+  ai-stack gpu llm        - Switch to LLM mode (with VRAM check)
+  ai-stack gpu off        - Stop all GPU services
+  ai-stack gpu status     - Show GPU and service status
+
+Examples:
+  ai-stack vram status    # Check current VRAM state
+  ai-stack vram stt       # Prepare for STT (unload LLM)
+  ai-stack gpu llm        # Switch to LLM mode
+  ai-stack up             # Start all containers
+
+Environment Variables:
+  LLAMA_CPP_URL   llama.cpp URL (default: http://localhost:7865)
+  WHISPER_URL     Whisper STT URL (default: http://localhost:7861)
+EOF
+        exit 0
         ;;
 esac

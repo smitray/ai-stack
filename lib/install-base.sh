@@ -85,19 +85,14 @@ fi
 echo "Installing AI Stack utilities..."
 mkdir -p "$HOME/.local/bin"
 
-# Install ai-vram-manager
-if [ -f "$REPO_ROOT/bin/ai-vram-manager" ]; then
-    cp "$REPO_ROOT/bin/ai-vram-manager" "$HOME/.local/bin/"
-    chmod +x "$HOME/.local/bin/ai-vram-manager"
-    echo "  - ai-vram-manager installed"
-fi
-
 # Install llama-router
 if [ -f "$REPO_ROOT/bin/llama-router" ]; then
     cp "$REPO_ROOT/bin/llama-router" "$HOME/.local/bin/"
     chmod +x "$HOME/.local/bin/llama-router"
     echo "  - llama-router installed"
 fi
+
+# Note: VRAM management is available via: ai-stack vram <command>
 
 # 7. Inject CUDA paths into ~/.zshrc (if not already present)
 ZSHRC="$HOME/.zshrc"

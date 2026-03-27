@@ -397,14 +397,14 @@ get_preferred_mic() {
 # =============================================================================
 
 ensure_stt_vram() {
-    # Use ai-vram-manager to ensure LLM is unloaded before STT
-    if command -v ai-vram-manager &>/dev/null; then
+    # Use ai-stack vram stt to ensure LLM is unloaded before STT
+    if command -v ai-stack &>/dev/null; then
         log_info "Checking VRAM state..."
-        ai-vram-manager ensure-stt >/dev/null 2>&1
+        ai-stack vram stt >/dev/null 2>&1
         log_success "VRAM ready for STT"
         return 0
     else
-        log_warn "ai-vram-manager not found, skipping VRAM check"
+        log_warn "ai-stack not found, skipping VRAM check"
         return 0
     fi
 }
