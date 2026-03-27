@@ -9,6 +9,7 @@ This ensures VRAM is properly managed when STT is activated.
 """
 
 import asyncio
+import json
 import logging
 import subprocess
 import sys
@@ -55,6 +56,8 @@ async def unload_llama_model() -> dict:
             )
             if response.status_code == 200:
                 logger.info("Model unloaded via llama.cpp API")
+                # Write state file
+                await write_state("stt")
                 return {"success": True, "method": "api"}
             elif response.status_code == 404:
                 logger.debug("/models/unload endpoint not found, trying systemd")
@@ -77,6 +80,7 @@ async def unload_llama_model() -> dict:
 
         if process.returncode == 0:
             logger.info("Model unloaded via systemd")
+            await write_state("stt")
             return {"success": True, "method": "systemd"}
         else:
             logger.warning(f"systemctl failed: {stderr.decode()}")
@@ -86,6 +90,23 @@ async def unload_llama_model() -> dict:
     # Already unloaded or not running
     logger.info("llama.cpp not running or already unloaded")
     return {"success": True, "method": "not_running"}
+
+
+async def write_state(active: str) -> None:
+    """Write VRAM state file."""
+    import os
+    
+    state_file = f"/run/user/{os.getuid()}/ai-stack-vram-state"
+    state = {"active": active, "timestamp": int(asyncio.get_event_loop().time())}
+    
+    try:
+        run_dir = os.path.dirname(state_file)
+        os.makedirs(run_dir, exist_ok=True)
+        with open(state_file, 'w') as f:
+            json.dump(state, f)
+        logger.debug(f"State written: {active}")
+    except Exception as e:
+        logger.debug(f"Failed to write state: {e}")
 
 
 async def wait_for_whisper_ready(max_wait: int = 30) -> bool:
