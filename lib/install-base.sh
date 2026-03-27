@@ -81,7 +81,25 @@ else
     echo "Set HF_TOKEN in $ZSHENV to download models now."
 fi
 
-# 6. Inject CUDA paths into ~/.zshrc (if not already present)
+# 6. Install AI Stack utilities
+echo "Installing AI Stack utilities..."
+mkdir -p "$HOME/.local/bin"
+
+# Install ai-vram-manager
+if [ -f "$REPO_ROOT/bin/ai-vram-manager" ]; then
+    cp "$REPO_ROOT/bin/ai-vram-manager" "$HOME/.local/bin/"
+    chmod +x "$HOME/.local/bin/ai-vram-manager"
+    echo "  - ai-vram-manager installed"
+fi
+
+# Install llama-router
+if [ -f "$REPO_ROOT/bin/llama-router" ]; then
+    cp "$REPO_ROOT/bin/llama-router" "$HOME/.local/bin/"
+    chmod +x "$HOME/.local/bin/llama-router"
+    echo "  - llama-router installed"
+fi
+
+# 7. Inject CUDA paths into ~/.zshrc (if not already present)
 ZSHRC="$HOME/.zshrc"
 if [ -f "$ZSHRC" ]; then
     if ! grep -q "export CUDA_HOME=/opt/cuda" "$ZSHRC"; then
