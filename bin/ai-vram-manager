@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+#
+# ai-vram-manager - VRAM Management Utility
+#
+# Ensures only ONE model is loaded in VRAM at a time.
+# Used by both Hyprland STT and Open WebUI STT Proxy.
+#
+# Usage: ai-vram-manager <command>
+# Commands:
+#   ensure-stt    - Unload LLM if loaded, prepare for STT
+#   ensure-llm    - Wait for STT to finish, prepare for LLM
+#   status        - Show current VRAM state
+#   state         - Show state file content
+#
+
+set -euo pipefail
+
+readonly SCRIPT_NAME="ai-vram-manager"
+readonly VERSION="1.0.0"
+readonly STATE_FILE="/run/user/$(id -u)/ai-stack-vram-state"
+readonly LLAMA_CPP_URL="${LLAMA_CPP_URL:-http://localhost:7865}"
+readonly WHISPER_URL="${WHISPER_URL:-http://localhost:7861}"
+readonly MAX_WAIT="${MAX_WAIT:-60}"
+
+# Colors
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m'
+
+log_info() { echo -e "${BLUE}[INFO]${NC} $*" >&2; }
+log_success() { echo -e "${GREEN}[OK]${NC} $*" >&2; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $*" >&2; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+
+# Get currently loaded model from llama.cpp
+get_loaded_model() {
+    local response
+    response=$(curl -sf "$LLAMA_CPP_URL/models" 2>/dev/null || echo '{}')
+    
+    # Parse response to find loaded model
+    echo "$response" | jq -r '.data[]? | select(.status == "loaded") | .id' 2>/dev/null | head -1
+}
+
+# Unload model from llama.cpp
+unload_model() {
+    local model="${1:-}"
+    
+    log_info "Unloading model: ${model:-all}"
+    
+    local data
+    if [[ -n "$model" ]]; then
+        data="{\"model\": \"$model\"}"
+    else
+        data="{}"
+    fi
+    
+    local response
+    response=$(curl -sf -X POST "$LLAMA_CPP_URL/models/unload" \
+        -H "Content-Type: application/json" \
+        -d "$data" 2>/dev/null)
+    
+    if [[ $? -eq 0 ]]; then
+        log_success "Model unloaded"
+        return 0
+    else
+        log_warn "Failed to unload model via API"
+        return 1
+    fi
+}
+
+# Check if Whisper STT is healthy
+is_whisper_healthy() {
+    curl -sf "$WHISPER_URL/health" >/dev/null 2>&1
+}
+
+# Write state file
+write_state() {
+    local active="$1"  # "stt", "llm", or "none"
+    local timestamp
+    timestamp=$(date +%s)
+    
+    mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null || true
+    echo "{\"active\": \"$active\", \"timestamp\": $timestamp}" > "$STATE_FILE"
+    chmod 644 "$STATE_FILE" 2>/dev/null || true
+}
+
+# Read state file
+read_state() {
+    if [[ -f "$STATE_FILE" ]]; then
+        cat "$STATE_FILE" 2>/dev/null || echo '{"active": "none", "timestamp": 0}'
+    else
+        echo '{"active": "none", "timestamp": 0}'
+    fi
+}
+
+# Ensure VRAM is ready for STT
+cmd_ensure_stt() {
+    log_info "Ensuring VRAM ready for STT..."
+    
+    # Check if LLM is loaded
+    local loaded_model
+    loaded_model=$(get_loaded_model)
+    
+    if [[ -n "$loaded_model" ]]; then
+        log_info "LLM loaded ($loaded_model), unloading..."
+        unload_model "$loaded_model"
+        sleep 1  # Wait for VRAM to free
+        log_success "LLM unloaded"
+    else
+        log_info "No LLM loaded, VRAM ready"
+    fi
+    
+    # Verify Whisper is ready
+    if is_whisper_healthy; then
+        log_success "Whisper STT is healthy"
+    else
+        log_warn "Whisper STT not responding"
+    fi
+    
+    # Update state
+    write_state "stt"
+    log_success "VRAM ready for STT"
+    
+    # Output for scripting
+    echo "stt"
+}
+
+# Ensure VRAM is ready for LLM
+cmd_ensure_llm() {
+    log_info "Ensuring VRAM ready for LLM..."
+    
+    # Check state file for STT activity
+    if [[ -f "$STATE_FILE" ]]; then
+        local state active last_active elapsed
+        state=$(read_state)
+        active=$(echo "$state" | jq -r '.active' 2>/dev/null || echo "none")
+        last_active=$(echo "$state" | jq -r '.timestamp' 2>/dev/null || echo "0")
+        elapsed=$(($(date +%s) - last_active))
+        
+        if [[ "$active" == "stt" && $elapsed -lt 30 ]]; then
+            log_info "STT recently active (${elapsed}s ago), waiting..."
+            sleep 2
+        fi
+    fi
+    
+    # Update state
+    write_state "llm"
+    log_success "VRAM ready for LLM"
+    
+    # Output for scripting
+    echo "llm"
+}
+
+# Show current VRAM status
+cmd_status() {
+    echo ""
+    echo "┌─────────────────────────────────────────────┐"
+    echo "│ AI Stack VRAM Status                        │"
+    echo "├─────────────────────────────────────────────┤"
+    
+    # State file
+    if [[ -f "$STATE_FILE" ]]; then
+        local state active timestamp
+        state=$(cat "$STATE_FILE")
+        active=$(echo "$state" | jq -r '.active' 2>/dev/null || echo "unknown")
+        timestamp=$(echo "$state" | jq -r '.timestamp' 2>/dev/null || echo "0")
+        local elapsed=$(($(date +%s) - timestamp))
+        
+        echo "│ Active:     $active (${elapsed}s ago)                 │"
+    else
+        echo "│ Active:     none (no state file)                  │"
+    fi
+    
+    # llama.cpp status
+    local loaded_model
+    loaded_model=$(get_loaded_model)
+    if [[ -n "$loaded_model" ]]; then
+        echo "│ LLM:        ${loaded_model:0:35} │"
+    else
+        echo "│ LLM:        unloaded                              │"
+    fi
+    
+    # Whisper status
+    if is_whisper_healthy; then
+        echo "│ STT:        healthy                               │"
+    else
+        echo "│ STT:        not responding                        │"
+    fi
+    
+    # VRAM usage
+    if command -v nvidia-smi &>/dev/null; then
+        local vram
+        vram=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
+        echo "│ VRAM:       ${vram} MiB used                          │"
+    fi
+    
+    echo "└─────────────────────────────────────────────┘"
+    echo ""
+}
+
+# Show state file content
+cmd_state() {
+    if [[ -f "$STATE_FILE" ]]; then
+        cat "$STATE_FILE" | jq .
+    else
+        echo "No state file found"
+        echo '{"active": "none", "timestamp": 0}' | jq .
+    fi
+}
+
+# Clear state file
+cmd_clear() {
+    rm -f "$STATE_FILE"
+    log_success "State cleared"
+}
+
+cmd_help() {
+    cat <<EOF
+$SCRIPT_NAME v$VERSION - VRAM Management Utility
+
+Usage: $SCRIPT_NAME <command>
+
+Commands:
+  ensure-stt    Unload LLM if loaded, prepare for STT
+  ensure-llm    Wait for STT to finish, prepare for LLM
+  status        Show current VRAM status
+  state         Show state file content
+  clear         Clear state file
+  help          Show this help
+
+Environment Variables:
+  LLAMA_CPP_URL   llama.cpp URL (default: http://localhost:7865)
+  WHISPER_URL     Whisper STT URL (default: http://localhost:7861)
+  MAX_WAIT        Max wait time in seconds (default: 60)
+
+Examples:
+  $SCRIPT_NAME ensure-stt    # Prepare for STT (unload LLM)
+  $SCRIPT_NAME ensure-llm    # Prepare for LLM (wait for STT)
+  $SCRIPT_NAME status        # Show VRAM status
+  $SCRIPT_NAME state         # Show state file
+
+Exit Codes:
+  0 - Success
+  1 - Error
+EOF
+}
+
+# Main
+main() {
+    local command="${1:-status}"
+    shift || true
+    
+    case "$command" in
+        ensure-stt)
+            cmd_ensure_stt
+            ;;
+        ensure-llm)
+            cmd_ensure_llm
+            ;;
+        status)
+            cmd_status
+            ;;
+        state)
+            cmd_state
+            ;;
+        clear)
+            cmd_clear
+            ;;
+        help|--help|-h)
+            cmd_help
+            ;;
+        *)
+            log_error "Unknown command: $command"
+            cmd_help
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
