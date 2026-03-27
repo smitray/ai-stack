@@ -3,12 +3,16 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-# Source environment from ~/.zshenv
-if [ -f "$HOME/.zshenv" ]; then
-    source "$HOME/.zshenv"
+# Load shared constants
+_COMMON="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack/lib/common.sh"
+if [ -f "$_COMMON" ]; then
+    # shellcheck source=/dev/null
+    source "$_COMMON"
+    load_env
 else
-    echo "WARNING: ~/.zshenv not found. Please run: ai-stack install base"
-    echo "Continuing with default values..."
+    echo "WARNING: common.sh not found. Run: bash lib/install-base.sh first."
+    AI_STACK_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack"
+    AI_STACK_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ai-stack"
 fi
 
 echo "Setting up STT Proxy..."
@@ -34,8 +38,8 @@ cp "$REPO_ROOT/bare-metal/stt-proxy/test-router-mode.sh" "$HOME/.local/bin/"
 chmod +x "$HOME/.local/bin/test-router-mode.sh"
 
 # Install systemd units
-mkdir -p ~/.config/systemd/user/
-cp "$REPO_ROOT/bare-metal/stt-proxy/systemd/"*.service ~/.config/systemd/user/
+mkdir -p "$HOME/.config/systemd/user"
+cp "$REPO_ROOT/bare-metal/stt-proxy/systemd/"*.service "$HOME/.config/systemd/user/"
 systemctl --user daemon-reload
 
 echo ""

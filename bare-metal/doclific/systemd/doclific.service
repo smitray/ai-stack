@@ -1,0 +1,14 @@
+[Unit]
+Description=Doclific — Local Documentation Server
+# Inactive by default. Start manually: systemctl --user start doclific
+# Port: 7864
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/doclific
+WorkingDirectory=%h
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+# WantedBy is intentionally omitted — do NOT auto-start with default.target
