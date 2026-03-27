@@ -173,49 +173,16 @@ case "$COMMAND" in
         esac
         ;;
     install)
-        case "$1" in
-            base)
-                # Find repo root via the installed CLI's symlink or fall back
-                REPO_ROOT="${AI_STACK_REPO:-}"
-                if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT" ]; then
-                    echo "ERROR: AI_STACK_REPO not set. Set it to the repo path:"
-                    echo "  export AI_STACK_REPO=/path/to/ai-stack"
-                    exit 1
-                fi
-                bash "$REPO_ROOT/lib/install-base.sh"
-                ;;
-            stt)
-                REPO_ROOT="${AI_STACK_REPO:?AI_STACK_REPO not set}"
-                bash "$REPO_ROOT/bare-metal/stt/install.sh"
-                ;;
-            llama-cpp)
-                REPO_ROOT="${AI_STACK_REPO:?AI_STACK_REPO not set}"
-                bash "$REPO_ROOT/bare-metal/llama-cpp/install.sh"
-                ;;
-            stt-proxy)
-                REPO_ROOT="${AI_STACK_REPO:?AI_STACK_REPO not set}"
-                bash "$REPO_ROOT/bare-metal/stt-proxy/install.sh"
-                ;;
-            containers)
-                load_env
-                podman compose -f "$COMPOSE_FILE" pull
-                podman compose -f "$COMPOSE_FILE" up -d
-                ;;
-            all)
-                REPO_ROOT="${AI_STACK_REPO:?AI_STACK_REPO not set}"
-                bash "$REPO_ROOT/lib/install-base.sh"
-                bash "$REPO_ROOT/bare-metal/llama-cpp/install.sh"
-                bash "$REPO_ROOT/bare-metal/stt/install.sh"
-                bash "$REPO_ROOT/bare-metal/stt-proxy/install.sh"
-                load_env
-                podman compose -f "$COMPOSE_FILE" pull
-                podman compose -f "$COMPOSE_FILE" up -d
-                ;;
-            *)
-                echo "Usage: ai-stack install {base|stt|llama-cpp|stt-proxy|containers|all}"
-                exit 1
-                ;;
-        esac
+        echo "ERROR: 'ai-stack install' is not available from the installed CLI."
+        echo ""
+        echo "Installation is done from the repo. Run:"
+        echo "  bash /path/to/ai-stack/lib/install-base.sh"
+        echo ""
+        echo "Component installers:"
+        echo "  bash /path/to/ai-stack/bare-metal/llama-cpp/install.sh"
+        echo "  bash /path/to/ai-stack/bare-metal/stt/install.sh"
+        echo "  bash /path/to/ai-stack/bare-metal/stt-proxy/install.sh"
+        exit 1
         ;;
     models)
         load_env
@@ -303,11 +270,9 @@ Commands:
   logs            View container logs
   gpu             GPU mode (stt|llm|off|status)
   vram            VRAM state (stt|llm|status|state|clear|history)
-  install         Install components (base|stt|llama-cpp|stt-proxy|containers|all)
   models          Model management (list|status|download|add-llama|cleanup)
 
 Environment Variables:
-  AI_STACK_REPO   Path to the ai-stack repo (required for install commands)
   WHISPER_URL     Whisper STT URL (default: http://localhost:7861)
   LLAMA_CPP_URL   llama.cpp URL   (default: http://localhost:7865)
 
