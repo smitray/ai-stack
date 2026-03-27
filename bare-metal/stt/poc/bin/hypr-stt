@@ -393,10 +393,30 @@ get_preferred_mic() {
 }
 
 # =============================================================================
+# VRAM Management
+# =============================================================================
+
+ensure_stt_vram() {
+    # Use ai-vram-manager to ensure LLM is unloaded before STT
+    if command -v ai-vram-manager &>/dev/null; then
+        log_info "Checking VRAM state..."
+        ai-vram-manager ensure-stt >/dev/null 2>&1
+        log_success "VRAM ready for STT"
+        return 0
+    else
+        log_warn "ai-vram-manager not found, skipping VRAM check"
+        return 0
+    fi
+}
+
+# =============================================================================
 # Recording Functions
 # =============================================================================
 
 start_recording() {
+    # Ensure VRAM is ready for STT (unload LLM if loaded)
+    ensure_stt_vram
+    
     # Check if server is ready, auto-start if not
     if ! server_ready; then
         log_info "Server not ready, auto-starting..."
