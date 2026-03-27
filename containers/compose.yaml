@@ -47,7 +47,7 @@ services:
     container_name: qdrant
     volumes:
       - type: bind
-        source: ./qdrant/config/production.yaml
+        source: ${AI_STACK_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack}/qdrant/production.yaml
         target: /qdrant/config/production.yaml
         read_only: true
       - type: volume
@@ -73,15 +73,13 @@ services:
   searxng:
     image: docker.io/searxng/searxng:latest
     container_name: searxng
-    ports:
-      - "7863:8080"
     volumes:
       - type: bind
-        source: ./searxng/config
+        source: ${AI_STACK_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack}/searxng
         target: /etc/searxng
         read_write: true
     environment:
-      - BASE_URL=http://localhost:7863/
+      - BASE_URL=http://searxng:8080/
       - SEARXNG_SECRET=${SEARXNG_SECRET:?SEARXNG_SECRET not set}
     depends_on:
       valkey:
