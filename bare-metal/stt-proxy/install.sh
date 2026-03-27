@@ -33,6 +33,13 @@ cp "$REPO_ROOT/bare-metal/stt-proxy/stt_proxy.py" "$AI_STACK_DATA_DIR/stt-proxy/
 cp "$REPO_ROOT/bare-metal/stt-proxy/test-router-mode.sh" "$HOME/.local/bin/"
 chmod +x "$HOME/.local/bin/test-router-mode.sh"
 
+# Copy VRAM manager (if not already installed)
+if [[ ! -x "$HOME/.local/bin/ai-vram-manager" ]]; then
+    cp "$REPO_ROOT/bin/ai-vram-manager" "$HOME/.local/bin/"
+    chmod +x "$HOME/.local/bin/ai-vram-manager"
+    echo "Installed ai-vram-manager"
+fi
+
 # Install systemd units
 mkdir -p ~/.config/systemd/user/
 cp "$REPO_ROOT/bare-metal/stt-proxy/systemd/"*.service ~/.config/systemd/user/
