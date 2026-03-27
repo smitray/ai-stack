@@ -2,6 +2,8 @@
 
 **Two ways to use Speech-to-Text in AI Stack**
 
+**VRAM Rule:** Only ONE model loaded at a time (STT or LLM)
+
 ---
 
 ## Workflow 1: Hyprland Keybindings (System-Wide)
@@ -18,30 +20,36 @@
 
 ### VRAM Management
 
-**Manual** - You control when to switch between LLM and STT:
+**Automatic** - `ai-vram-manager` checks and unloads LLM before STT:
 
 ```bash
+# When you press Super+N:
+# 1. ai-vram-manager checks llama.cpp /models API
+# 2. If LLM loaded → auto-unload via API (~1s)
+# 3. Continue with recording
+```
+
+**Manual override (optional):**
+```bash
 # Before using STT (if LLM is loaded):
-Super+Alt+R  # Stop Whisper server
-# OR
+ai-vram-manager ensure-stt  # Manually ensure VRAM ready
+
+# Or switch GPU mode:
 ai-stack gpu stt  # Switch GPU mode
-
-# Use STT:
-Super+N  # Toggle recording
-
-# After STT (optional):
-ai-stack gpu llm  # Switch back to LLM
 ```
 
 ### Architecture
 
 ```
-Super+N → hypr-stt → Whisper STT (:7861)
+Super+N → hypr-stt → ai-vram-manager ensure-stt
+                      ↓ (if LLM loaded: unload)
+                      ↓
+                 Whisper STT (:7861)
                       ↓
                  Types text
 ```
 
-**Note:** Does NOT use STT Proxy. Direct connection to Whisper.
+**Note:** Automatic VRAM management via ai-vram-manager.
 
 ---
 
@@ -58,14 +66,17 @@ Open WebUI is pre-configured to use STT Proxy at port 7866.
 **Automatic** - STT Proxy handles everything:
 
 1. Click microphone icon 🎤
-2. STT Proxy unloads llama.cpp via API
-3. Audio transcribed
-4. Next LLM request auto-loads model
+2. STT Proxy calls ai-vram-manager logic
+3. llama.cpp model unloaded via API (~1s)
+4. Audio transcribed
+5. State file updated
 
 ### Architecture
 
 ```
-Open WebUI → STT Proxy (:7866) → llama.cpp /models/unload
+Open WebUI → STT Proxy (:7866) → ai-vram-manager logic
+                                  ↓
+                             llama.cpp /models/unload
                                   ↓
                              Whisper STT (:7861)
                                   ↓
@@ -85,6 +96,25 @@ Open WebUI → STT Proxy (:7866) → llama.cpp /models/unload
 ---
 
 ## Commands
+
+### VRAM Management
+
+```bash
+# Check VRAM status
+ai-vram-manager status
+
+# Ensure ready for STT (unload LLM)
+ai-vram-manager ensure-stt
+
+# Ensure ready for LLM (wait for STT)
+ai-vram-manager ensure-llm
+
+# Show state file
+ai-vram-manager state
+
+# Clear state
+ai-vram-manager clear
+```
 
 ### Management
 
@@ -131,6 +161,28 @@ systemctl --user status stt-proxy
 
 ---
 
+## State File
+
+**Location:** `/run/user/1000/ai-stack-vram-state`
+
+**Format:**
+```json
+{"active": "stt", "timestamp": 1234567890}
+```
+
+**Values:**
+- `"active": "stt"` - STT recently active
+- `"active": "llm"` - LLM recently active
+- `"active": "none"` - No active service
+
+**Used by:**
+- `ai-vram-manager` - Read/write state
+- `hypr-stt` - Writes via ai-vram-manager
+- `STT Proxy` - Writes after unload
+- `llama.cpp` - Can check before loading LLM
+
+---
+
 ## Troubleshooting
 
 ### Hyprland STT not working
@@ -144,6 +196,9 @@ hyprctl keybinds | grep stt
 
 # Test manually
 hypr-stt toggle
+
+# Check VRAM status
+ai-vram-manager status
 ```
 
 ### Open WebUI STT not working
@@ -166,12 +221,27 @@ curl http://localhost:7866/health
 # Check VRAM
 nvidia-smi
 
+# Check state
+ai-vram-manager status
+
 # Unload llama.cpp
+ai-vram-manager ensure-stt
+# OR
 llama-router unload
 
 # Or switch GPU mode
 ai-stack gpu stt   # For STT
 ai-stack gpu llm   # For LLM
+```
+
+### LLM won't load
+
+```bash
+# Check if STT is active
+ai-vram-manager state
+
+# If STT active, wait or clear
+ai-vram-manager ensure-llm  # Waits for STT to finish
 ```
 
 ---
@@ -180,14 +250,15 @@ ai-stack gpu llm   # For LLM
 
 | Aspect | Hyprland Keybindings | Open WebUI |
 |--------|---------------------|------------|
-| **VRAM Management** | Manual | Automatic |
+| **VRAM Management** | Automatic (ai-vram-manager) | Automatic (STT Proxy) |
 | **Uses STT Proxy** | No | Yes |
 | **Endpoint** | Direct (:7861) | Proxy (:7866) |
 | **Scope** | System-wide | Open WebUI only |
-| **Unload llama.cpp** | User responsibility | STT Proxy handles |
+| **State File** | Updated | Updated |
 
 ---
 
 **Remember:** 
-- **Hyprland (Super+N):** You manage VRAM
-- **Open WebUI (🎤):** STT Proxy manages VRAM
+- Both workflows now have **automatic VRAM management**
+- State file tracks active service
+- Only ONE model in VRAM at a time
