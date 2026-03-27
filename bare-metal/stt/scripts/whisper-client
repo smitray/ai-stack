@@ -3,18 +3,25 @@
 # whisper-client - Whisper STT CLI
 #
 # Unified client for Whisper STT server management and transcription.
+# Includes auto-start, comprehensive readiness checks, and activity tracking.
+#
+# Usage: whisper-client <command>
+# Commands: start, stop, restart, status, health, vram, wait-ready, help
 #
 
 set -euo pipefail
 
 readonly SCRIPT_NAME="whisper-client"
-readonly VERSION="1.0.0"
+readonly VERSION="1.1.0"
 
 # Configuration
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack/stt"
 PORT_FILE="$CONFIG_DIR/port"
 PORT="${WHISPER_PORT:-$(cat "$PORT_FILE" 2>/dev/null || echo 7861)}"
 API_URL="http://localhost:$PORT"
+RUN_DIR="/run/user/$(id -u)"
+PID_FILE="$RUN_DIR/whisper-api-server.pid"
+IDLE_FILE="$RUN_DIR/whisper-api-idle"
 
 # Colors
 readonly RED='\033[0;31m'
@@ -28,60 +35,287 @@ log_success() { echo -e "${GREEN}[OK]${NC} $*"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-# Server management
-cmd_start() {
-    if systemctl --user start whisper-server.service 2>/dev/null; then
-        log_info "Waiting for server to be ready..."
-        local waited=0
-        while [[ $waited -lt 120 ]]; do
-            if curl -sf "$API_URL/ready" >/dev/null 2>&1; then
-                log_success "Server ready"
-                return 0
-            fi
-            sleep 1
-            ((waited++))
-        done
-        log_error "Server timeout"
+# Check if process is running
+is_process_running() {
+    local pid="$1"
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+# Get server PID
+get_server_pid() {
+    # Try PID file first
+    if [[ -f "$PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+        if [[ -n "$pid" ]] && is_process_running "$pid"; then
+            echo "$pid"
+            return 0
+        fi
+    fi
+    
+    # Fallback to pgrep
+    pgrep -f "whisper_stt" 2>/dev/null | head -1 || echo ""
+}
+
+# Check if server process is running
+is_server_running() {
+    [[ -n "$(get_server_pid)" ]]
+}
+
+# Check server health endpoint
+check_server_health() {
+    curl -sf "$API_URL/health" >/dev/null 2>&1
+}
+
+# Check if server is ready (model loaded)
+check_server_ready() {
+    curl -sf "$API_URL/ready" >/dev/null 2>&1
+}
+
+# Get VRAM usage
+get_vram_usage() {
+    nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | \
+        awk '{printf "%.0f / %.0f MiB (%.0f%%)", $1, $2, ($1/$2)*100}' || echo "N/A"
+}
+
+# Record activity (reset idle timer)
+record_activity() {
+    date +%s > "$IDLE_FILE" 2>/dev/null || true
+    
+    # Ensure idle monitor is running
+    if ! systemctl --user is-active --quiet whisper-idle-monitor.service 2>/dev/null; then
+        systemctl --user start whisper-idle-monitor.service 2>/dev/null || true
+    fi
+}
+
+# Wait for server to be ready
+wait_for_ready() {
+    local max_wait="${1:-120}"
+    local waited=0
+    
+    log_info "Waiting for server to be ready..."
+    
+    while [[ $waited -lt $max_wait ]]; do
+        if check_server_ready; then
+            log_success "Server ready!"
+            return 0
+        fi
+        
+        # Check if process is still running
+        if ! is_server_running; then
+            log_error "Server process died"
+            return 1
+        fi
+        
+        sleep 1
+        ((waited++))
+        
+        if [[ $((waited % 10)) -eq 0 ]]; then
+            log_info "Still starting... ($waited/$max_wait seconds)"
+        fi
+    done
+    
+    log_error "Server failed to start within ${max_wait}s"
+    return 1
+}
+
+# Comprehensive readiness check (like POC hypr-stt)
+check_comprehensive_ready() {
+    # 1. Check if server process is running
+    if ! is_server_running; then
+        log_warn "Server process not running"
         return 1
+    fi
+    
+    # 2. Check health endpoint
+    if ! check_server_health; then
+        log_warn "Health check failed"
+        return 1
+    fi
+    
+    # 3. Check if model is loaded
+    if ! check_server_ready; then
+        log_warn "Model not loaded yet"
+        return 1
+    fi
+    
+    # 4. Verify PID file exists (optional)
+    if [[ ! -f "$PID_FILE" ]]; then
+        log_info "PID file not found (server may be managed by systemd)"
+    fi
+    
+    log_success "Server is fully ready"
+    return 0
+}
+
+# Start server with auto-start and comprehensive checks
+cmd_start() {
+    # Check if already running
+    if is_server_running; then
+        if check_comprehensive_ready; then
+            log_info "Server is already running and ready"
+            record_activity
+            cmd_status
+            return 0
+        else
+            log_warn "Server is running but not ready yet"
+            wait_for_ready 60 && return 0 || return 1
+        fi
+    fi
+    
+    log_info "Starting Whisper STT server..."
+    
+    # Start via systemd
+    if systemctl --user start whisper-server.service 2>/dev/null; then
+        log_info "Server starting via systemd"
+        
+        # Wait for server to be ready
+        if wait_for_ready 120; then
+            # Record activity and start idle monitor
+            record_activity
+            log_success "Server started successfully"
+            cmd_status
+            return 0
+        else
+            log_error "Server failed to become ready"
+            return 1
+        fi
     else
-        log_error "Failed to start server"
+        log_error "Failed to start server via systemd"
         return 1
     fi
 }
 
+# Stop server
 cmd_stop() {
+    if ! is_server_running; then
+        log_info "Server is not running"
+        return 0
+    fi
+    
+    # Get VRAM before stopping
+    local vram_before
+    vram_before=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1 || echo "0")
+    
+    log_info "Stopping Whisper STT server..."
+    
+    # Stop via systemd
     if systemctl --user stop whisper-server.service 2>/dev/null; then
         log_success "Server stopped"
+        
+        # Show VRAM freed
+        sleep 1
+        local vram_after
+        vram_after=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1 || echo "0")
+        local vram_freed=$((vram_before - vram_after))
+        
+        if [[ $vram_freed -gt 0 ]]; then
+            log_success "VRAM freed: ${vram_freed} MiB"
+        fi
+        
+        # Clean up activity file
+        rm -f "$IDLE_FILE" 2>/dev/null || true
+        
+        return 0
     else
-        log_info "Server not running"
-    fi
-}
-
-cmd_status() {
-    local response
-    if response=$(curl -sf "$API_URL/status" 2>/dev/null); then
-        echo "$response" | python3 -m json.tool
-    else
-        log_error "Server not responding"
+        log_error "Failed to stop server"
         return 1
     fi
 }
 
+# Restart server
+cmd_restart() {
+    log_info "Restarting Whisper STT server..."
+    cmd_stop
+    sleep 2
+    cmd_start
+}
+
+# Show detailed status
+cmd_status() {
+    local pid
+    pid=$(get_server_pid)
+    
+    echo ""
+    echo "┌─────────────────────────────────────────────┐"
+    echo "│ Whisper STT Server Status                   │"
+    echo "├─────────────────────────────────────────────┤"
+    
+    if [[ -z "$pid" ]]; then
+        echo "│ Status:     ${RED}● Stopped${NC}                       │"
+        echo "│ URL:        http://localhost:$PORT              │"
+    else
+        local status_json
+        status_json=$(curl -sf "$API_URL/status" 2>/dev/null || echo '{}')
+        
+        local model device compute loaded vram_used vram_total vram_percent
+        model=$(echo "$status_json" | grep -o '"model":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+        device=$(echo "$status_json" | grep -o '"device":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+        compute=$(echo "$status_json" | grep -o '"compute_type":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+        loaded=$(echo "$status_json" | grep -o '"model_loaded":[a-z]*' | cut -d':' -f2 || echo "false")
+        vram_used=$(echo "$status_json" | grep -o '"used_mb":[0-9]*' | cut -d':' -f2 || echo "0")
+        vram_total=$(echo "$status_json" | grep -o '"total_mb":[0-9]*' | cut -d':' -f2 || echo "0")
+        vram_percent=$(echo "$status_json" | grep -o '"percent":[0-9.]*' | cut -d':' -f2 || echo "0")
+        
+        if [[ "$loaded" == "true" ]]; then
+            echo "│ Status:     ${GREEN}● Running${NC}                       │"
+        else
+            echo "│ Status:     ${YELLOW}● Loading${NC}                       │"
+        fi
+        
+        echo "│ Model:      $model ($compute)                │"
+        echo "│ Device:     $device                           │"
+        echo "│ Port:       $PORT                             │"
+        
+        if [[ -n "$vram_total" ]] && [[ "$vram_total" != "0" ]]; then
+            echo "│ VRAM:       ${vram_used} MiB / ${vram_total} MiB (${vram_percent}%)      │"
+        else
+            echo "│ VRAM:       N/A (CPU mode)                    │"
+        fi
+        
+        echo "│ PID:        $pid                              │"
+    fi
+    
+    echo "└─────────────────────────────────────────────┘"
+    echo ""
+}
+
+# Check server health
+cmd_health() {
+    if check_server_health; then
+        log_success "Server healthy"
+        return 0
+    else
+        log_error "Server unhealthy or not running"
+        return 1
+    fi
+}
+
+# Show VRAM usage
 cmd_vram() {
     if command -v nvidia-smi &>/dev/null; then
-        nvidia-smi --query-gpu=memory.used,memory.total,memory.free --format=csv
+        echo ""
+        echo "=== GPU VRAM Usage ==="
+        nvidia-smi --query-gpu=name,memory.used,memory.total,memory.free --format=csv
+        echo ""
+        
+        # Show server VRAM if running
+        if check_server_health; then
+            local status_json
+            status_json=$(curl -sf "$API_URL/status" 2>/dev/null || echo '{}')
+            local vram_used
+            vram_used=$(echo "$status_json" | grep -o '"used_mb":[0-9]*' | cut -d':' -f2 || echo '0')
+            echo "Server VRAM usage: ${vram_used} MiB"
+        fi
     else
-        log_error "nvidia-smi not found"
+        log_error "nvidia-smi not found. Are NVIDIA drivers installed?"
     fi
 }
 
-cmd_health() {
-    if curl -sf "$API_URL/health" >/dev/null 2>&1; then
-        log_success "Server healthy"
-    else
-        log_error "Server unhealthy"
-        return 1
-    fi
+# Wait for server to be ready (for scripts)
+cmd_wait_ready() {
+    local timeout="${1:-120}"
+    wait_for_ready "$timeout"
 }
 
 cmd_help() {
@@ -91,30 +325,57 @@ $SCRIPT_NAME v$VERSION - Whisper STT CLI
 Usage: $SCRIPT_NAME <command>
 
 Commands:
-  start       Start the server
-  stop        Stop the server
-  status      Show server status
-  vram        Show GPU VRAM usage
-  health      Check server health
-  help        Show this help
+  start         Start the server (with auto-start and readiness checks)
+  stop          Stop the server and free VRAM
+  restart       Restart the server
+  status        Show detailed server status
+  health        Check server health endpoint
+  vram          Show GPU VRAM usage
+  wait-ready    Wait for server to be ready (for scripts)
+  help          Show this help
 
 Environment Variables:
   WHISPER_PORT    API server port (default: 7861)
+
+Examples:
+  $SCRIPT_NAME start         # Start server with comprehensive checks
+  $SCRIPT_NAME stop          # Stop server, free VRAM
+  $SCRIPT_NAME status        # Show detailed status
+  $SCRIPT_NAME vram          # Check VRAM usage
+  $SCRIPT_NAME wait-ready    # Wait for server to be ready
 EOF
 }
 
 # Main
 main() {
-    local command="${1:-help}"
+    local command="${1:-status}"
     shift || true
-
+    
     case "$command" in
-        start) cmd_start ;;
-        stop) cmd_stop ;;
-        status) cmd_status ;;
-        vram) cmd_vram ;;
-        health) cmd_health ;;
-        help|--help|-h) cmd_help ;;
+        start)
+            cmd_start
+            ;;
+        stop)
+            cmd_stop
+            ;;
+        restart)
+            cmd_restart
+            ;;
+        status)
+            cmd_status
+            ;;
+        health)
+            cmd_health
+            ;;
+        vram)
+            cmd_vram
+            ;;
+        wait-ready)
+            cmd_wait_ready "$@"
+            ;;
+        help|--help|-h)
+            cmd_help
+            ;;
         *)
             log_error "Unknown command: $command"
             cmd_help

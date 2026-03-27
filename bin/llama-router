@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+#
+# llama.cpp Router Mode Management CLI
+#
+
+set -e
+
+LLAMA_CPP_URL="http://localhost:7865"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $*"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+
+cmd_models() {
+    log_info "Fetching model list..."
+    response=$(curl -sf "$LLAMA_CPP_URL/models" 2>&1)
+    
+    if [ $? -eq 0 ]; then
+        echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
+    else
+        log_error "Failed to get models. Is llama.cpp running?"
+        return 1
+    fi
+}
+
+cmd_unload() {
+    local model="${1:-}"
+    
+    log_info "Unloading model..."
+    
+    if [ -n "$model" ]; then
+        data="{\"model\": \"$model\"}"
+    else
+        data="{}"
+    fi
+    
+    response=$(curl -sf -X POST "$LLAMA_CPP_URL/models/unload" \
+        -H "Content-Type: application/json" \
+        -d "$data" 2>&1)
+    
+    if [ $? -eq 0 ]; then
+        log_success "Model unloaded"
+        echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
+    else
+        log_error "Failed to unload model"
+        return 1
+    fi
+}
+
+cmd_load() {
+    local model="$1"
+    
+    if [ -z "$model" ]; then
+        log_error "Model name required"
+        echo "Usage: llama-router load <model-name>"
+        return 1
+    fi
+    
+    log_info "Loading model: $model"
+    
+    response=$(curl -sf -X POST "$LLAMA_CPP_URL/models/load" \
+        -H "Content-Type: application/json" \
+        -d "{\"model\": \"$model\"}" 2>&1)
+    
+    if [ $? -eq 0 ]; then
+        log_success "Model loaded"
+        echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
+    else
+        log_error "Failed to load model"
+        return 1
+    fi
+}
+
+cmd_status() {
+    log_info "llama.cpp Router Status"
+    echo ""
+    echo "┌─────────────────────────────────────────────┐"
+    echo "│ llama.cpp Router Mode Status                │"
+    echo "├─────────────────────────────────────────────┤"
+    
+    # Check if server is running
+    if curl -sf "$LLAMA_CPP_URL/health" >/dev/null 2>&1; then
+        echo "│ Status:     ${GREEN}● Running${NC}                       │"
+    else
+        echo "│ Status:     ${RED}● Stopped${NC}                         │"
+        echo "└─────────────────────────────────────────────┘"
+        echo ""
+        log_info "Start with: systemctl --user start llama-cpp"
+        return 1
+    fi
+    
+    # Get models
+    models=$(curl -sf "$LLAMA_CPP_URL/models" 2>/dev/null || echo "{}")
+    
+    # Count loaded models
+    loaded=$(echo "$models" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for m in d.get('data',[]) if m.get('status')=='loaded'))" 2>/dev/null || echo "0")
+    
+    echo "│ Loaded:     $loaded model(s)                        │"
+    echo "│ URL:        $LLAMA_CPP_URL                  │"
+    echo "│ API:        /models, /models/load, /models/unload  │"
+    echo "└─────────────────────────────────────────────┘"
+    echo ""
+    
+    # Show VRAM
+    if command -v nvidia-smi &>/dev/null; then
+        vram=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
+        echo "GPU VRAM: ${vram} MiB used"
+    fi
+}
+
+cmd_health() {
+    if curl -sf "$LLAMA_CPP_URL/health" >/dev/null 2>&1; then
+        log_success "llama.cpp is healthy"
+        return 0
+    else
+        log_error "llama.cpp is not responding"
+        return 1
+    fi
+}
+
+cmd_help() {
+    cat <<EOF
+llama-router - llama.cpp Router Mode Management
+
+Usage: llama-router <command> [options]
+
+Commands:
+  models              List all models with status
+  load <model>        Load a specific model
+  unload [model]      Unload current model (or specific model)
+  status              Show router status
+  health              Check health endpoint
+  help                Show this help
+
+Examples:
+  llama-router models                    # List all models
+  llama-router load qwen-3b              # Load qwen-3b model
+  llama-router unload                    # Unload current model
+  llama-router status                    # Show status
+
+API Endpoints:
+  GET  /models          - List models
+  POST /models/load     - Load model
+  POST /models/unload   - Unload model
+  GET  /health          - Health check
+
+Environment Variables:
+  LLAMA_CPP_URL         Router URL (default: http://localhost:7865)
+EOF
+}
+
+# Main
+main() {
+    local command="${1:-status}"
+    shift || true
+    
+    case "$command" in
+        models)
+            cmd_models
+            ;;
+        load)
+            cmd_load "$@"
+            ;;
+        unload)
+            cmd_unload "$@"
+            ;;
+        status)
+            cmd_status
+            ;;
+        health)
+            cmd_health
+            ;;
+        help|--help|-h)
+            cmd_help
+            ;;
+        *)
+            log_error "Unknown command: $command"
+            cmd_help
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

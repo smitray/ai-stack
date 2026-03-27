@@ -32,23 +32,25 @@ n-gpu-layers = 99
 flash-attn = true
 cache-type-k = q4_0
 cache-type-v = q4_0
+sleep-idle-seconds = 300
 
-; Chat model
-[ggml-org/Qwen2.5-3B-Instruct-GGUF:Q4_K_M]
+; Chat model - use HF repo as section name (recommended)
+[unsloth/Qwen3.5-4B-GGUF:Q4_K_M]
 c = 4096
-chat-template = chatml
+chat-template = qwen
+load-on-startup = false
 
 ; Coding model
-[ggml-org/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M]
+[Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M]
 c = 2048
-chat-template = chatml
+chat-template = qwen
 ```
 
 **Precedence:** CLI args > model-specific preset > global preset
 
 **Exclusive preset options:**
 - `load-on-startup` (boolean) -- preload model at server start
-- `stop-timeout` (integer seconds) -- timeout for stopping
+- `stop-timeout` (integer seconds) -- timeout for stopping model
 
 ---
 

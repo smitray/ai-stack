@@ -31,11 +31,18 @@ def create_app(config: Config) -> FastAPI:
 
     # Initialize service
     service = TranscriptionService(config)
+    model_loaded = False
 
     @app.on_event("startup")
     async def startup_event():
-        """Load model on startup."""
-        service.load_model()
+        """Load model on startup if configured."""
+        nonlocal model_loaded
+        if config.model.load_on_startup:
+            service.load_model()
+            model_loaded = True
+            logger.info("Model loaded on startup")
+        else:
+            logger.info("Server started (model will load on first request)")
 
     @app.on_event("shutdown")
     async def shutdown_event():
@@ -51,6 +58,14 @@ def create_app(config: Config) -> FastAPI:
     async def readiness_check():
         """Check if model is loaded and ready."""
         if not service.is_model_loaded():
+            # Try to load model if not loaded (lazy loading)
+            if not config.model.load_on_startup:
+                try:
+                    service.load_model()
+                    return HealthResponse(status="ready", model_loaded=True)
+                except Exception as e:
+                    logger.error(f"Failed to load model: {e}")
+                    raise HTTPException(status_code=503, detail=f"Model load failed: {str(e)}")
             raise HTTPException(status_code=503, detail="Model not loaded")
         return HealthResponse(status="ready", model_loaded=True)
 
@@ -84,8 +99,12 @@ def create_app(config: Config) -> FastAPI:
         response_format: Optional[str] = Form("json"),
     ):
         """Transcribe audio file (OpenAI-compatible endpoint)."""
+        # Lazy load model if not loaded
         if not service.is_model_loaded():
-            raise HTTPException(status_code=503, detail="Model not loaded")
+            try:
+                service.load_model()
+            except Exception as e:
+                raise HTTPException(status_code=503, detail=f"Model load failed: {str(e)}")
 
         # Validate file type
         if not file.content_type or not file.content_type.startswith("audio/"):

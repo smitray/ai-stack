@@ -24,6 +24,7 @@ class ModelConfig:
     name: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
     device: str = "auto"  # auto, cuda, cpu
     compute_type: str = "float16"
+    load_on_startup: bool = True  # If False, server starts but model loads on first request
 
 
 @dataclass
@@ -115,3 +116,9 @@ class Config:
             self.model.device = device
         if compute_type := os.environ.get("WHISPER_COMPUTE_TYPE"):
             self.model.compute_type = compute_type
+        if load_on_startup := os.environ.get("WHISPER_LOAD_ON_STARTUP"):
+            self.model.load_on_startup = load_on_startup.lower() in ("true", "1", "yes")
+        if idle_timeout := os.environ.get("WHISPER_IDLE_TIMEOUT"):
+            self.idle.timeout_seconds = int(idle_timeout)
+        if min_vram := os.environ.get("WHISPER_MIN_VRAM"):
+            self.gpu.min_vram_mb = int(min_vram)

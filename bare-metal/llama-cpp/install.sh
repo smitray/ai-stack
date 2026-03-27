@@ -2,7 +2,14 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source ~/.env
+
+# Source environment from ~/.zshenv
+if [ -f "$HOME/.zshenv" ]; then
+    source "$HOME/.zshenv"
+else
+    echo "WARNING: ~/.zshenv not found. Please run: ai-stack install base"
+    echo "Continuing with default values..."
+fi
 
 echo "Installing llama.cpp with optimizations..."
 
@@ -13,12 +20,15 @@ if ! command -v hf &>/dev/null; then
 fi
 
 # Authenticate with HF if token is set
-if [ -n "$HF_TOKEN" ] && [ "$HF_TOKEN" != "your_token_here" ]; then
+if [ -n "$HF_TOKEN" ] && [ "$HF_TOKEN" != "" ]; then
     echo "Authenticating with HuggingFace..."
     hf auth login --token "$HF_TOKEN" || true
-    
+
     echo "Downloading default LLM model to HF cache..."
-    hf download unsloth/Qwen3.5-4B-GGUF Q4_K_M.gguf || true
+    hf download unsloth/Qwen3.5-4B-GGUF --include Q4_K_M.gguf || true
+
+    echo "Downloading reasoning model to HF cache..."
+    hf download Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF --include Q4_K_M.gguf || true
 fi
 
 # Create dirs

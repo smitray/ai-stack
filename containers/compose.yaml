@@ -1,12 +1,17 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: docker.io/library/postgres:17-alpine
     container_name: postgres
-    env_file: ${HOME}/.env
     environment:
       - POSTGRES_USER=aistack
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD not set}
+      - OPENWEBUI_DB_PASSWORD=${OPENWEBUI_DB_PASSWORD:?OPENWEBUI_DB_PASSWORD not set}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - type: volume
+        source: postgres-data
+        target: /var/lib/postgresql/data
+        volume:
+          nocopy: false
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U aistack"]
       interval: 5s
@@ -14,13 +19,19 @@ services:
       retries: 5
     mem_limit: 512m
     restart: unless-stopped
+    networks:
+      - ai-stack
 
   valkey:
-    image: valkey/valkey:8-alpine
+    image: docker.io/valkey/valkey:8-alpine
     container_name: valkey
     command: valkey-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
     volumes:
-      - valkey-data:/data
+      - type: volume
+        source: valkey-data
+        target: /data
+        volume:
+          nocopy: false
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
@@ -28,14 +39,27 @@ services:
       retries: 5
     mem_limit: 384m
     restart: unless-stopped
+    networks:
+      - ai-stack
 
   qdrant:
-    image: qdrant/qdrant:latest
+    image: docker.io/qdrant/qdrant:latest
     container_name: qdrant
     volumes:
-      - ./qdrant/config/production.yaml:/qdrant/config/production.yaml:ro
-      - qdrant-storage:/qdrant/storage
-      - qdrant-snapshots:/qdrant/snapshots
+      - type: bind
+        source: ./qdrant/config/production.yaml
+        target: /qdrant/config/production.yaml
+        read_only: true
+      - type: volume
+        source: qdrant-storage
+        target: /qdrant/storage
+        volume:
+          nocopy: false
+      - type: volume
+        source: qdrant-snapshots
+        target: /qdrant/snapshots
+        volume:
+          nocopy: false
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:6333/readyz || exit 1"]
       interval: 5s
@@ -43,16 +67,22 @@ services:
       retries: 5
     mem_limit: 512m
     restart: unless-stopped
+    networks:
+      - ai-stack
 
   searxng:
-    image: searxng/searxng:latest
+    image: docker.io/searxng/searxng:latest
     container_name: searxng
     ports:
-      - "8888:8080"
+      - "7863:8080"
     volumes:
-      - ./searxng/config:/etc/searxng:rw
+      - type: bind
+        source: ./searxng/config
+        target: /etc/searxng
+        read_write: true
     environment:
-      - BASE_URL=http://localhost:8888/
+      - BASE_URL=http://localhost:7863/
+      - SEARXNG_SECRET=${SEARXNG_SECRET:?SEARXNG_SECRET not set}
     depends_on:
       valkey:
         condition: service_healthy
@@ -63,21 +93,33 @@ services:
       retries: 5
     mem_limit: 256m
     restart: unless-stopped
+    networks:
+      - ai-stack
 
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: openwebui
     ports:
-      - "3000:8080"
-    env_file: ${HOME}/.env
+      - "7860:8080"
     environment:
       - WEBUI_AUTH=false
-      - OPENAI_API_BASE_URL=http://host.containers.internal:8080/v1
+      - OPENAI_API_BASE_URL=http://host.containers.internal:7865/v1
       - RAG_EMBEDDING_ENGINE=
       - RAG_EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
       - RAG_EMBEDDING_BATCH_SIZE=26
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:?WEBUI_SECRET_KEY not set}
+      - OPENWEBUI_DATABASE_URL=postgresql://openwebui:${OPENWEBUI_DB_PASSWORD}@postgres:5432/openwebui
+      # Speech-to-Text Configuration (STT Proxy with VRAM management)
+      - AUDIO_STT_ENGINE=openai
+      - AUDIO_STT_OPENAI_API_BASE_URL=http://host.containers.internal:7866/v1
+      - AUDIO_STT_OPENAI_API_KEY=sk-no-key-required
+      - AUDIO_STT_MODEL=whisper-stt
     volumes:
-      - open-webui-data:/app/backend/data
+      - type: volume
+        source: open-webui-data
+        target: /app/backend/data
+        volume:
+          nocopy: false
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,10 +129,76 @@ services:
         condition: service_started
     mem_limit: 1g
     restart: unless-stopped
+    networks:
+      - ai-stack
+
+  n8n:
+    image: docker.io/n8nio/n8n:latest
+    container_name: n8n
+    ports:
+      - "7862:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://localhost:7862/
+    volumes:
+      - type: volume
+        source: n8n-data
+        target: /home/node/.n8n
+        volume:
+          nocopy: false
+    mem_limit: 1g
+    restart: unless-stopped
+    networks:
+      - ai-stack
 
 volumes:
   postgres-data:
+    name: ai-stack-postgres-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${AI_STACK_DATA_DIR:-$HOME/.local/share/ai-stack}/volumes/postgres
   valkey-data:
+    name: ai-stack-valkey-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${AI_STACK_DATA_DIR:-$HOME/.local/share/ai-stack}/volumes/valkey
   qdrant-storage:
+    name: ai-stack-qdrant-storage
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${AI_STACK_DATA_DIR:-$HOME/.local/share/ai-stack}/volumes/qdrant/storage
   qdrant-snapshots:
+    name: ai-stack-qdrant-snapshots
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${AI_STACK_DATA_DIR:-$HOME/.local/share/ai-stack}/volumes/qdrant/snapshots
   open-webui-data:
+    name: ai-stack-open-webui-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${AI_STACK_DATA_DIR:-$HOME/.local/share/ai-stack}/volumes/open-webui
+  n8n-data:
+    name: ai-stack-n8n-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${AI_STACK_DATA_DIR:-$HOME/.local/share/ai-stack}/volumes/n8n
+
+networks:
+  ai-stack:
+    name: ai-stack-network
+    driver: bridge

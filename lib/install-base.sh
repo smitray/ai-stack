@@ -33,19 +33,35 @@ elif command -v pipx &>/dev/null; then
     pipx install huggingface_hub
 fi
 
-# 4. Setup ~/.env
-if [ ! -f "$HOME/.env" ]; then
-    echo "Creating ~/.env from template. Please fill in your API keys."
-    cp .env.example "$HOME/.env"
+# 4. Setup environment from template
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ZSHENV="$HOME/.zshenv"
+TEMPLATE="$REPO_ROOT/templates/zshenv.template"
+
+if [ ! -f "$ZSHENV" ] || ! grep -q "AI_STACK_DATA_DIR" "$ZSHENV"; then
+    echo "Setting up environment configuration..."
+    if [ -f "$TEMPLATE" ]; then
+        echo "" >> "$ZSHENV"
+        echo "# AI Stack Environment (added by ai-stack install)" >> "$ZSHENV"
+        cat "$TEMPLATE" >> "$ZSHENV"
+        echo "" >> "$ZSHENV"
+        echo "Environment configuration added to $ZSHENV"
+        echo "Please edit $ZSHENV and fill in your API keys."
+    else
+        echo "WARNING: Template not found at $TEMPLATE"
+        echo "Please manually configure environment variables in $ZSHENV"
+    fi
+else
+    echo "Environment already configured in $ZSHENV"
 fi
 
 # Source environment for subsequent steps
-if [ -f "$HOME/.env" ]; then
-    source "$HOME/.env"
+if [ -f "$ZSHENV" ]; then
+    source "$ZSHENV"
 fi
 
 # 5. Download Models to HF Cache
-if [ -n "$HF_TOKEN" ]; then
+if [ -n "$HF_TOKEN" ] && [ "$HF_TOKEN" != "" ]; then
     echo "Authenticating with HuggingFace..."
     hf auth login --token "$HF_TOKEN" || true
 
@@ -53,23 +69,36 @@ if [ -n "$HF_TOKEN" ]; then
     hf download deepdml/faster-whisper-large-v3-turbo-ct2 || true
 
     echo "Downloading LLM model to HF cache..."
-    hf download unsloth/Qwen3.5-4B-GGUF Q4_K_M.gguf || true
+    hf download unsloth/Qwen3.5-4B-GGUF --include Q4_K_M.gguf || true
+
+    echo "Downloading reasoning model to HF cache..."
+    hf download Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF --include Q4_K_M.gguf || true
 
     echo "Verifying cache..."
     hf cache ls
 else
     echo "WARNING: HF_TOKEN not set. Models will be downloaded on first use."
-    echo "Set HF_TOKEN in ~/.env to download models now."
+    echo "Set HF_TOKEN in $ZSHENV to download models now."
 fi
 
-# 6. Inject into ~/.zshrc
+# 6. Install AI Stack utilities
+echo "Installing AI Stack utilities..."
+mkdir -p "$HOME/.local/bin"
+
+# Install llama-router
+if [ -f "$REPO_ROOT/bin/llama-router" ]; then
+    cp "$REPO_ROOT/bin/llama-router" "$HOME/.local/bin/"
+    chmod +x "$HOME/.local/bin/llama-router"
+    echo "  - llama-router installed"
+fi
+
+# Note: VRAM management is available via: ai-stack vram <command>
+
+# 7. Inject CUDA paths into ~/.zshrc (if not already present)
 ZSHRC="$HOME/.zshrc"
 if [ -f "$ZSHRC" ]; then
-    if ! grep -q "source ~/.env" "$ZSHRC"; then
-        echo -e "\n# AI Stack Environment\nif [ -f ~/.env ]; then\n  source ~/.env\nfi" >> "$ZSHRC"
-    fi
     if ! grep -q "export CUDA_HOME=/opt/cuda" "$ZSHRC"; then
-        echo -e "\n# CUDA Paths\nexport CUDA_HOME=/opt/cuda\nexport PATH=\$CUDA_HOME/bin:\$PATH\nexport LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\$LD_LIBRARY_PATH" >> "$ZSHRC"
+        echo -e "\n# CUDA Paths (AI Stack)\nexport CUDA_HOME=/opt/cuda\nexport PATH=\$CUDA_HOME/bin:\$PATH\nexport LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\$LD_LIBRARY_PATH" >> "$ZSHRC"
     fi
 fi
 
@@ -77,6 +106,7 @@ echo ""
 echo "Bootstrap complete!"
 echo ""
 echo "Next steps:"
-echo "  1. Edit ~/.env and add your API keys"
-echo "  2. Run: ai-stack install all"
+echo "  1. Edit $ZSHENV and add your API keys"
+echo "  2. Run: source $ZSHENV"
+echo "  3. Run: ai-stack install all"
 echo ""

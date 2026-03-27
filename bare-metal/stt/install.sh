@@ -2,7 +2,14 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source ~/.env
+
+# Source environment from ~/.zshenv
+if [ -f "$HOME/.zshenv" ]; then
+    source "$HOME/.zshenv"
+else
+    echo "WARNING: ~/.zshenv not found. Please run: ai-stack install base"
+    echo "Continuing with default values..."
+fi
 
 echo "Setting up Whisper STT..."
 
@@ -13,10 +20,10 @@ if ! command -v hf &>/dev/null; then
 fi
 
 # Authenticate with HF if token is set
-if [ -n "$HF_TOKEN" ] && [ "$HF_TOKEN" != "your_token_here" ]; then
+if [ -n "$HF_TOKEN" ] && [ "$HF_TOKEN" != "" ]; then
     echo "Authenticating with HuggingFace..."
     hf auth login --token "$HF_TOKEN" || true
-    
+
     echo "Downloading STT model to HF cache..."
     hf download deepdml/faster-whisper-large-v3-turbo-ct2 || true
 fi
@@ -39,7 +46,7 @@ cd "$REPO_ROOT/bare-metal/stt"
 
 # Copy scripts
 cp "$REPO_ROOT/bare-metal/stt/scripts/"* "$HOME/.local/bin/"
-chmod +x "$HOME/.local/bin/"{whisper-client,whisper-idle-monitor}
+chmod +x "$HOME/.local/bin/"{whisper-client,whisper-idle-monitor,whisper-activity}
 
 # Install systemd units
 mkdir -p ~/.config/systemd/user/

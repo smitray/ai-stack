@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+#
+# whisper-activity - Activity tracking for Whisper STT idle monitor
+#
+# Records activity timestamps to reset the idle timer.
+# Called by hypr-stt after successful transcription or manual server start.
+#
+# Usage: whisper-activity <command>
+# Commands: record, init, status
+#
+
+set -euo pipefail
+
+readonly SCRIPT_NAME="whisper-activity"
+readonly RUN_DIR="/run/user/$(id -u)"
+readonly IDLE_FILE="$RUN_DIR/whisper-api-idle"
+readonly PORT="${WHISPER_PORT:-7861}"
+
+log_info() {
+    echo "[INFO] $*" >&2
+}
+
+log_error() {
+    echo "[ERROR] $*" >&2
+}
+
+# Record activity timestamp
+cmd_record() {
+    local timestamp
+    timestamp=$(date +%s)
+    echo "$timestamp" > "$IDLE_FILE" 2>/dev/null || true
+    
+    # Ensure idle monitor is running
+    if systemctl --user is-active --quiet whisper-idle-monitor.service 2>/dev/null; then
+        log_info "Activity recorded (idle timer reset)"
+    else
+        # Start idle monitor if not running
+        systemctl --user start whisper-idle-monitor.service 2>/dev/null || true
+        log_info "Activity recorded (idle monitor started)"
+    fi
+}
+
+# Initialize activity tracking (called on server start)
+cmd_init() {
+    # Create initial activity timestamp
+    cmd_record
+    log_info "Activity tracking initialized"
+}
+
+# Show activity status
+cmd_status() {
+    if [[ -f "$IDLE_FILE" ]]; then
+        local last_activity current_time idle_time
+        last_activity=$(cat "$IDLE_FILE" 2>/dev/null || echo "0")
+        current_time=$(date +%s)
+        idle_time=$((current_time - last_activity))
+        
+        echo "Last activity: ${idle_time}s ago"
+        
+        if systemctl --user is-active --quiet whisper-idle-monitor.service 2>/dev/null; then
+            echo "Idle monitor: running"
+        else
+            echo "Idle monitor: not running"
+        fi
+    else
+        echo "No activity recorded"
+    fi
+}
+
+cmd_help() {
+    cat <<EOF
+$SCRIPT_NAME - Whisper STT Activity Tracker
+
+Usage: $SCRIPT_NAME <command>
+
+Commands:
+  record    Record activity timestamp (reset idle timer)
+  init      Initialize activity tracking
+  status    Show activity status
+  help      Show this help
+
+Environment Variables:
+  WHISPER_PORT    API server port (default: 7861)
+
+Examples:
+  $SCRIPT_NAME record    # Record activity after transcription
+  $SCRIPT_NAME init      # Initialize on server start
+  $SCRIPT_NAME status    # Check idle timer status
+EOF
+}
+
+# Main
+main() {
+    local command="${1:-record}"
+    
+    case "$command" in
+        record)
+            cmd_record
+            ;;
+        init)
+            cmd_init
+            ;;
+        status)
+            cmd_status
+            ;;
+        help|--help|-h)
+            cmd_help
+            ;;
+        *)
+            log_error "Unknown command: $command"
+            cmd_help
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

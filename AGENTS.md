@@ -128,6 +128,7 @@ hf cache ls
 |---------|-------|------|------------|
 | STT | `deepdml/faster-whisper-large-v3-turbo-ct2` | ~1.5-2 GB | `~/.cache/huggingface/hub/models--deepdml--faster-whisper-large-v3-turbo-ct2/` |
 | LLM | `unsloth/Qwen3.5-4B-GGUF` (Q4_K_M) | ~2-2.5 GB | `~/.cache/huggingface/hub/models--unsloth--Qwen3.5-4B-GGUF/` |
+| LLM (Reasoning) | `Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF` (Q4_K_M) | ~2-2.5 GB | `~/.cache/huggingface/hub/models--Jackrong--Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF/` |
 | Embedding | `nomic-ai/nomic-embed-text-v1.5` | ~400 MB | Auto-download by Open WebUI |
 
 ## Model Management CLI
@@ -180,6 +181,126 @@ The STT service has been rewritten as a production-quality FastAPI application:
 - Pydantic validation + YAML config + structured JSON logging
 - Systemd services: `whisper-server` + `whisper-idle-monitor` (10 min timeout)
 - Unified bash CLI (`whisper-client`) for server management
+
+### VRAM Management: STT Proxy + llama.cpp Router Mode
+
+**Two STT Workflows:**
+
+1. **Hyprland Keybindings (Super+N)** - Direct to Whisper STT
+2. **Open WebUI (Microphone icon)** - Via STT Proxy (with VRAM management)
+
+---
+
+#### **Workflow 1: Hyprland Keybindings (Super+N)**
+
+```
+User presses Super+N
+    ↓
+hypr-stt script (independent client)
+    ↓
+Records audio from microphone
+    ↓
+Sends directly to Whisper STT (:7861)
+    ↓
+Types transcription result
+```
+
+**Key Points:**
+- **Does NOT use STT Proxy** - Direct connection to Whisper
+- **Does NOT unload llama.cpp** - Assumes user manages VRAM via keybindings
+- **Independent of Open WebUI** - Works system-wide
+- **VRAM Management:** User manually unloads llama.cpp with `Super+Alt+R` before using STT
+
+**Keybindings:**
+| Shortcut | Command | Purpose |
+|----------|---------|---------|
+| <kbd>SUPER</kbd> + <kbd>N</kbd> | `hypr-stt toggle` | Start/stop recording |
+| <kbd>SUPER</kbd> + <kbd>ALT</kbd> + <kbd>R</kbd> | `whisper-client stop` | Stop server (free VRAM) |
+| <kbd>SUPER</kbd> + <kbd>SHIFT</kbd> + <kbd>S</kbd> | `whisper-client start` | Start server |
+
+---
+
+#### **Workflow 2: Open WebUI (Microphone Icon)**
+
+```
+Open WebUI (port 7860)
+    ↓ Click microphone
+    ↓
+STT Proxy (port 7866)
+    ├─→ POST /models/unload → llama.cpp Router API (port 7865)
+    │   └─→ Unloads model via native API (faster than systemd)
+    ├─→ Wait for Whisper STT ready (port 7861)
+    └─→ Forward audio → Return transcription
+```
+
+**Key Points:**
+- **Uses STT Proxy** - Automatic VRAM management
+- **Auto-unloads llama.cpp** - No manual intervention needed
+- **Open WebUI only** - Configured in compose.yaml
+
+---
+
+**llama.cpp Router Mode Features:**
+- `--models-max 1`: Only 1 model loaded at a time (4GB VRAM constraint)
+- `--sleep-idle-seconds 300`: Auto-unload after 5 min idle
+- **API Endpoints:**
+  - `GET /models` - List models with status
+  - `POST /models/load` - Load a model
+  - `POST /models/unload` - Unload a model (used by STT Proxy)
+
+**Configuration:**
+| Service | Port | Purpose | Used By |
+|---------|------|---------|---------|
+| STT Proxy | `7866` | VRAM-aware STT routing | Open WebUI |
+| Whisper STT | `7861` | Transcription service | Both |
+| llama.cpp Router | `7865` | LLM with model management API | Both |
+
+**Environment Variables (Open WebUI):**
+```yaml
+AUDIO_STT_ENGINE: "openai"
+AUDIO_STT_OPENAI_API_BASE_URL: "http://host.containers.internal:7866/v1"
+AUDIO_STT_OPENAI_API_KEY: "sk-no-key-required"
+AUDIO_STT_MODEL: "whisper-stt"
+```
+
+**Why llama.cpp Router Mode Doesn't Replace STT Proxy:**
+
+llama.cpp router mode manages **only llama.cpp models (GGUF format)**:
+- ✅ Can load/unload LLM models via `/models/unload`
+- ❌ **Cannot manage Whisper STT** (different framework, CTranslate2 backend)
+- ❌ **Cannot route `/v1/audio/transcriptions` requests**
+
+Therefore, STT Proxy is still needed to:
+1. Intercept STT requests from Open WebUI
+2. Call llama.cpp's `/models/unload` API (native, faster than systemd)
+3. Forward to Whisper STT
+4. Return transcription
+
+**Install STT Proxy:**
+```bash
+bash bare-metal/stt-proxy/install.sh
+systemctl --user start stt-proxy
+```
+
+**Manual Configuration (if needed):**
+1. Open Open WebUI at `http://localhost:7860`
+2. Go to **Admin Settings** → **Audio** tab
+3. Set Speech-to-Text Engine to `OpenAI`
+4. Enter API Base URL: `http://localhost:7866/v1` (STT Proxy!)
+5. Enter any API key (e.g., `sk-no-key-required`)
+6. Click **Save**
+
+**Voice Input in Open WebUI:**
+- Click the **microphone icon** in the chat input
+- STT Proxy calls llama.cpp `/models/unload` API (native, fast)
+- Audio is sent to Whisper STT for transcription
+- Transcribed text appears in the chat input
+- llama.cpp model auto-reloads on next LLM request (or via `/models/load` API)
+
+**Hyprland Keybindings (Super+N):**
+- Press <kbd>SUPER</kbd> + <kbd>N</kbd> to toggle recording
+- **Important:** Unload llama.cpp first with <kbd>SUPER</kbd> + <kbd>ALT</kbd> + <kbd>R</kbd> if LLM is loaded
+- Or use `ai-stack gpu stt` to switch GPU mode
 
 ## Troubleshooting
 
