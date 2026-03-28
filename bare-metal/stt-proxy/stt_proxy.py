@@ -11,7 +11,7 @@ This ensures VRAM is properly managed when STT is activated.
 import asyncio
 import json
 import logging
-import subprocess
+import os
 import sys
 from pathlib import Path
 
@@ -19,10 +19,12 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 import httpx
 
-# Configuration
-WHISPER_URL = "http://localhost:7861/v1/audio/transcriptions"
-LLAMA_CPP_URL = "http://localhost:7865"
-PROXY_PORT = 7866
+# Configuration — read from environment (set via systemd EnvironmentFile=~/.zshenv
+# or common.sh). Fallback values match defaults in lib/common.sh.
+_WHISPER_BASE = os.environ.get("WHISPER_URL", "http://localhost:7861")
+WHISPER_URL = f"{_WHISPER_BASE}/v1/audio/transcriptions"
+LLAMA_CPP_URL = os.environ.get("LLAMA_CPP_URL", "http://localhost:7865")
+PROXY_PORT = int(os.environ.get("STT_PROXY_PORT", "7866"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,11 +50,12 @@ async def unload_llama_model() -> dict:
     logger.info("Unloading llama.cpp model via API...")
 
     # Method 1: Native llama.cpp router API (preferred)
+    # Empty body = unload whatever model is currently loaded (model-agnostic)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 f"{LLAMA_CPP_URL}/models/unload",
-                json={"model": "unsloth/Qwen3.5-4B-GGUF:Q4_K_M"}
+                json={}
             )
             if response.status_code == 200:
                 logger.info("Model unloaded via llama.cpp API")
@@ -114,7 +117,7 @@ async def wait_for_whisper_ready(max_wait: int = 30) -> bool:
     async with httpx.AsyncClient(timeout=5.0) as client:
         for i in range(max_wait):
             try:
-                response = await client.get(f"http://localhost:7861/health")
+                response = await client.get(f"{_WHISPER_BASE}/health")
                 if response.status_code == 200:
                     logger.info("Whisper STT is ready")
                     return True

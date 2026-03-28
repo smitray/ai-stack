@@ -29,7 +29,10 @@ export SEARXNG_SECRET=""
 # === Paths ===
 export AI_STACK_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ai-stack"
 export AI_STACK_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack"
-export AI_STACK_MODELS_DIR="${HOME}/.cache/huggingface/hub"
+
+# === HuggingFace Cache (XDG-compliant) ===
+export HF_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/huggingface"
+export AI_STACK_MODELS_DIR="${HF_HOME}/hub"
 
 # === CUDA Paths (Arch Linux) ===
 export CUDA_HOME=/opt/cuda
