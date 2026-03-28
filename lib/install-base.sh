@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
+#
+# lib/install-base.sh — AI Stack bootstrap installer
+#
+# Installs all components to XDG locations.
+# This is the entry point: ai-stack install base
+#
 set -e
 
-echo "Starting AI Stack Bootstrap..."
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# 1. Dependency Check & Auto-Install
-DEPENDENCIES=("podman" "podman-compose" "nvidia-container-toolkit" "base-devel" "cmake" "git" "cuda")
+echo "=== AI Stack Bootstrap ==="
+echo ""
+
+# ---------------------------------------------------------------------------
+# 1. System dependencies
+# ---------------------------------------------------------------------------
+echo "[1/8] Checking system dependencies..."
+DEPENDENCIES=(podman podman-compose nvidia-container-toolkit base-devel cmake git cuda)
 MISSING=()
 
 for pkg in "${DEPENDENCIES[@]}"; do
@@ -14,99 +26,148 @@ for pkg in "${DEPENDENCIES[@]}"; do
 done
 
 if [ ${#MISSING[@]} -gt 0 ]; then
-    echo "Installing missing dependencies: ${MISSING[*]}"
+    echo "  Installing: ${MISSING[*]}"
     sudo pacman -S --needed --noconfirm "${MISSING[@]}"
+else
+    echo "  All dependencies present."
 fi
 
-# 2. Configure NVIDIA Container Toolkit for Podman
+# ---------------------------------------------------------------------------
+# 2. NVIDIA Container Toolkit for Podman
+# ---------------------------------------------------------------------------
+echo "[2/8] Configuring NVIDIA Container Toolkit..."
 if ! grep -q "nvidia-container-runtime" /etc/containers/containers.conf 2>/dev/null; then
-    echo "Configuring NVIDIA Container Toolkit for Podman..."
     sudo nvidia-ctk runtime configure --runtime=podman
     systemctl --user restart podman.socket || true
+else
+    echo "  Already configured."
 fi
 
-# 3. Install HuggingFace CLI (for model management)
-echo "Installing HuggingFace CLI..."
-if command -v pip &>/dev/null; then
-    pip install -U "huggingface_hub[cli]" --quiet
-elif command -v pipx &>/dev/null; then
-    pipx install huggingface_hub
-fi
-
-# 4. Setup environment from template
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# ---------------------------------------------------------------------------
+# 3. Environment setup (~/.zshenv)
+# ---------------------------------------------------------------------------
+echo "[3/8] Setting up environment (~/.zshenv)..."
 ZSHENV="$HOME/.zshenv"
 TEMPLATE="$REPO_ROOT/templates/zshenv.template"
 
 if [ ! -f "$ZSHENV" ] || ! grep -q "AI_STACK_DATA_DIR" "$ZSHENV"; then
-    echo "Setting up environment configuration..."
     if [ -f "$TEMPLATE" ]; then
-        echo "" >> "$ZSHENV"
-        echo "# AI Stack Environment (added by ai-stack install)" >> "$ZSHENV"
-        cat "$TEMPLATE" >> "$ZSHENV"
-        echo "" >> "$ZSHENV"
-        echo "Environment configuration added to $ZSHENV"
-        echo "Please edit $ZSHENV and fill in your API keys."
+        {
+            echo ""
+            echo "# AI Stack Environment (added by ai-stack install base)"
+            cat "$TEMPLATE"
+            echo ""
+        } >> "$ZSHENV"
+        echo "  Added to $ZSHENV — please fill in your API keys."
     else
-        echo "WARNING: Template not found at $TEMPLATE"
-        echo "Please manually configure environment variables in $ZSHENV"
+        echo "  WARNING: Template not found at $TEMPLATE"
     fi
 else
-    echo "Environment already configured in $ZSHENV"
+    echo "  Already configured in $ZSHENV"
 fi
 
-# Source environment for subsequent steps
-if [ -f "$ZSHENV" ]; then
-    source "$ZSHENV"
+# Load environment for subsequent steps
+# shellcheck source=/dev/null
+[ -f "$ZSHENV" ] && { set -a; source "$ZSHENV"; set +a; }
+
+# ---------------------------------------------------------------------------
+# 4. Install lib/common.sh to XDG config dir
+# ---------------------------------------------------------------------------
+echo "[4/8] Installing lib/common.sh..."
+AI_STACK_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack"
+mkdir -p "$AI_STACK_CONFIG_DIR/lib"
+cp "$REPO_ROOT/lib/common.sh" "$AI_STACK_CONFIG_DIR/lib/common.sh"
+echo "  Installed to $AI_STACK_CONFIG_DIR/lib/common.sh"
+
+# ---------------------------------------------------------------------------
+# 5. Install ai-stack CLI to ~/.local/bin
+# ---------------------------------------------------------------------------
+echo "[5/8] Installing ai-stack CLI..."
+mkdir -p "$HOME/.local/bin"
+cp "$REPO_ROOT/bin/ai-stack" "$HOME/.local/bin/ai-stack"
+chmod +x "$HOME/.local/bin/ai-stack"
+echo "  Installed to $HOME/.local/bin/ai-stack"
+
+# ---------------------------------------------------------------------------
+# 6. Install compose.yaml to XDG config dir
+# ---------------------------------------------------------------------------
+echo "[6/8] Installing compose.yaml..."
+cp "$REPO_ROOT/containers/compose.yaml" "$AI_STACK_CONFIG_DIR/compose.yaml"
+
+# Copy container service configs (bind-mounted by compose)
+mkdir -p "$AI_STACK_CONFIG_DIR/searxng"
+cp -r "$REPO_ROOT/containers/searxng/config/." "$AI_STACK_CONFIG_DIR/searxng/"
+mkdir -p "$AI_STACK_CONFIG_DIR/qdrant"
+cp "$REPO_ROOT/containers/qdrant/config/production.yaml" "$AI_STACK_CONFIG_DIR/qdrant/production.yaml"
+echo "  Installed to $AI_STACK_CONFIG_DIR/compose.yaml"
+
+# ---------------------------------------------------------------------------
+# 7. Create XDG data directories (volume mounts)
+# ---------------------------------------------------------------------------
+echo "[7/8] Creating data directories..."
+AI_STACK_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ai-stack"
+for vol in postgres valkey qdrant/storage qdrant/snapshots open-webui n8n; do
+    mkdir -p "$AI_STACK_DATA_DIR/volumes/$vol"
+done
+echo "  Created under $AI_STACK_DATA_DIR/volumes/"
+
+# ---------------------------------------------------------------------------
+# 8. HuggingFace CLI + models
+# ---------------------------------------------------------------------------
+echo "[8/8] Setting up HuggingFace..."
+HF_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/huggingface"
+export HF_HOME
+
+if ! command -v hf &>/dev/null; then
+    echo "  Installing HuggingFace CLI..."
+    if command -v pip &>/dev/null; then
+        pip install -U "huggingface_hub[cli]" --quiet
+    elif command -v pipx &>/dev/null; then
+        pipx install huggingface_hub
+    fi
 fi
 
-# 5. Download Models to HF Cache
-if [ -n "$HF_TOKEN" ] && [ "$HF_TOKEN" != "" ]; then
-    echo "Authenticating with HuggingFace..."
+if [ -n "$HF_TOKEN" ]; then
     hf auth login --token "$HF_TOKEN" || true
 
-    echo "Downloading STT model to HF cache..."
+    echo "  Downloading STT model..."
     hf download deepdml/faster-whisper-large-v3-turbo-ct2 || true
 
-    echo "Downloading LLM model to HF cache..."
+    echo "  Downloading LLM model..."
     hf download unsloth/Qwen3.5-4B-GGUF --include Q4_K_M.gguf || true
 
-    echo "Downloading reasoning model to HF cache..."
-    hf download Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF --include Q4_K_M.gguf || true
+    echo "  Downloading reasoning model..."
+    hf download Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF \
+        --include Q4_K_M.gguf || true
 
-    echo "Verifying cache..."
+    echo "  Cache contents:"
     hf cache ls
 else
-    echo "WARNING: HF_TOKEN not set. Models will be downloaded on first use."
-    echo "Set HF_TOKEN in $ZSHENV to download models now."
+    echo "  WARNING: HF_TOKEN not set — models will download on first use."
 fi
 
-# 6. Install AI Stack utilities
-echo "Installing AI Stack utilities..."
-mkdir -p "$HOME/.local/bin"
-
-# Install llama-router
-if [ -f "$REPO_ROOT/bin/llama-router" ]; then
-    cp "$REPO_ROOT/bin/llama-router" "$HOME/.local/bin/"
-    chmod +x "$HOME/.local/bin/llama-router"
-    echo "  - llama-router installed"
-fi
-
-# Note: VRAM management is available via: ai-stack vram <command>
-
-# 7. Inject CUDA paths into ~/.zshrc (if not already present)
+# ---------------------------------------------------------------------------
+# CUDA paths in ~/.zshrc
+# ---------------------------------------------------------------------------
 ZSHRC="$HOME/.zshrc"
-if [ -f "$ZSHRC" ]; then
-    if ! grep -q "export CUDA_HOME=/opt/cuda" "$ZSHRC"; then
-        echo -e "\n# CUDA Paths (AI Stack)\nexport CUDA_HOME=/opt/cuda\nexport PATH=\$CUDA_HOME/bin:\$PATH\nexport LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\$LD_LIBRARY_PATH" >> "$ZSHRC"
-    fi
+if [ -f "$ZSHRC" ] && ! grep -q "CUDA_HOME=/opt/cuda" "$ZSHRC"; then
+    {
+        echo ""
+        echo "# CUDA Paths (AI Stack)"
+        echo "export CUDA_HOME=/opt/cuda"
+        echo 'export PATH="$CUDA_HOME/bin:$PATH"'
+        echo 'export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$LD_LIBRARY_PATH"'
+    } >> "$ZSHRC"
 fi
 
+# ---------------------------------------------------------------------------
 echo ""
-echo "Bootstrap complete!"
+echo "=== Bootstrap complete! ==="
 echo ""
 echo "Next steps:"
-echo "  1. Edit $ZSHENV and add your API keys"
-echo "  2. Run: source $ZSHENV"
-echo "  3. Run: ai-stack install all"
+echo "  1. Fill in API keys: $ZSHENV"
+echo "  2. source $ZSHENV"
+echo "  3. ai-stack install llama-cpp"
+echo "  4. ai-stack install stt"
+echo "  5. ai-stack up"
 echo ""

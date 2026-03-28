@@ -3,33 +3,21 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-# Source environment from ~/.zshenv
-if [ -f "$HOME/.zshenv" ]; then
-    source "$HOME/.zshenv"
+# Load shared constants (installed by: ai-stack install base)
+_COMMON="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack/lib/common.sh"
+if [ -f "$_COMMON" ]; then
+    # shellcheck source=/dev/null
+    source "$_COMMON"
+    load_env
 else
-    echo "WARNING: ~/.zshenv not found. Please run: ai-stack install base"
-    echo "Continuing with default values..."
+    echo "WARNING: common.sh not found. Run: ai-stack install base"
+    AI_STACK_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack"
+    AI_STACK_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ai-stack"
 fi
 
 echo "Installing llama.cpp with optimizations..."
+# Note: model downloads are handled by: ai-stack install base
 
-# Ensure HF CLI is installed
-if ! command -v hf &>/dev/null; then
-    echo "Installing HuggingFace CLI..."
-    pip install -U "huggingface_hub[cli]" --quiet
-fi
-
-# Authenticate with HF if token is set
-if [ -n "$HF_TOKEN" ] && [ "$HF_TOKEN" != "" ]; then
-    echo "Authenticating with HuggingFace..."
-    hf auth login --token "$HF_TOKEN" || true
-
-    echo "Downloading default LLM model to HF cache..."
-    hf download unsloth/Qwen3.5-4B-GGUF --include Q4_K_M.gguf || true
-
-    echo "Downloading reasoning model to HF cache..."
-    hf download Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF --include Q4_K_M.gguf || true
-fi
 
 # Create dirs
 mkdir -p "$AI_STACK_CONFIG_DIR/llama-cpp"
@@ -61,8 +49,8 @@ cmake --build build --config Release -j$(nproc)
 # Install configs and systemd units
 cd "$REPO_ROOT"
 cp bare-metal/llama-cpp/config/presets.ini "$AI_STACK_CONFIG_DIR/llama-cpp/"
-mkdir -p ~/.config/systemd/user/
-cp bare-metal/llama-cpp/config/llama-cpp.service ~/.config/systemd/user/
+mkdir -p "$HOME/.config/systemd/user"
+cp bare-metal/llama-cpp/config/llama-cpp.service "$HOME/.config/systemd/user/"
 systemctl --user daemon-reload
 
 echo ""

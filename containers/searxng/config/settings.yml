@@ -1,37 +1,588 @@
-use_default_settings: true
+# SearXNG Configuration — AI Stack
+# External: http://localhost:7863  (compose maps host:7863 → container:8080)
+# Internal: http://searxng:8080   (used by open-webui on ai-stack-network)
 
 general:
-  instance_name: "AI Stack Search"
   debug: false
+  instance_name: "AI Stack Search"
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: true
+  open_metrics: ''
 
-server:
-  port: 8080
-  bind_address: "0.0.0.0"
-  secret_key: ${SEARXNG_SECRET:-ai-stack-searxng-secret}
-  limiter: false  # Disable rate limiting for local use
-  image_proxy: true
+brand:
+  new_issue_url: https://github.com/searxng/searxng/issues/new
+  docs_url: https://docs.searxng.org/
+  public_instances: https://searx.space
+  wiki_url: https://github.com/searxng/searxng/wiki
+  issue_url: https://github.com/searxng/searxng/issues
 
 search:
   safe_search: 0
-  autocomplete: "duckduckgo"
-  default_lang: "en"
+  autocomplete: "duckduckgo"       # was: "" — enables inline suggestions
+  autocomplete_min: 3              # was: 4
+  favicon_resolver: "duckduckgo"   # was: "" — shows favicons in results
+  default_lang: "auto"
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 120
+  suspended_times:
+    SearxEngineAccessDenied: 180
+    SearxEngineCaptcha: 3600
+    SearxEngineTooManyRequests: 180
+    cf_SearxEngineCaptcha: 1296000
+    cf_SearxEngineAccessDenied: 86400
+    recaptcha_SearxEngineCaptcha: 604800
+  formats:
+    - html
+    - json   # required for Open WebUI RAG queries
 
-outgoing:
-  request_timeout: 5.0
-  max_request_timeout: 15.0
+server:
+  port: 8080                        # FIX: was 8888 — must match compose port mapping
+  bind_address: "0.0.0.0"          # FIX: was 127.0.0.1 — 0.0.0.0 required in container
+  base_url: false                   # overridden by ${SEARXNG_BASE_URL}
+  limiter: false                    # private instance — no rate limiting needed
+  public_instance: false
+  secret_key: "changeme"           # overridden by ${SEARXNG_SECRET} from compose env
+  image_proxy: true                 # proxy images through searxng (better privacy)
+  http_protocol_version: "1.1"     # FIX: was "1.0"
+  method: "GET"                    # FIX: was "POST" — GET reduces bot detection triggers
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Download-Options: noopen
+    X-Robots-Tag: noindex, nofollow
+    Referrer-Policy: no-referrer
+
+valkey:
+  # FIX: was false — valkey caching is critical for:
+  #   1. Deduplicating repeat queries (reduces engine hits → less bot detection)
+  #   2. Session handling
+  #   3. Limiter state (even when limiter: false, helps internally)
+  url: valkey://valkey:6379/0
 
 ui:
+  static_path: ""
+  templates_path: ""
+  query_in_title: false
   default_theme: simple
-  default_locale: en
+  center_alignment: false
+  default_locale: ""
+  theme_args:
+    simple_style: auto
+  search_on_category_select: true
+  hotkeys: default
+  url_formatting: pretty
+
+# Outgoing HTTP settings (requests to search engines)
+outgoing:
+  request_timeout: 5.0            # FIX: was 3.0 — 3s cuts off slower engines (scholar, arxiv)
+  max_request_timeout: 15.0
+  useragent_suffix: ""
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true              # HTTP/2 for supported engines (Google, Bing, Brave)
+
+plugins:
+  searx.plugins.calculator.SXNGPlugin:
+    active: true
+
+  searx.plugins.infinite_scroll.SXNGPlugin:
+    active: false
+
+  searx.plugins.hash_plugin.SXNGPlugin:
+    active: true
+
+  searx.plugins.self_info.SXNGPlugin:
+    active: true
+
+  searx.plugins.unit_converter.SXNGPlugin:
+    active: true
+
+  searx.plugins.ahmia_filter.SXNGPlugin:
+    active: true
+
+  searx.plugins.hostnames.SXNGPlugin:
+    active: true
+
+  searx.plugins.time_zone.SXNGPlugin:
+    active: true
+
+  searx.plugins.oa_doi_rewrite.SXNGPlugin:
+    active: false
+
+  searx.plugins.tor_check.SXNGPlugin:
+    active: false
+
+  searx.plugins.tracker_url_remover.SXNGPlugin:
+    active: true
+
+categories_as_tabs:
+  general:
+  images:
+  videos:
+  news:
+  map:
+  music:
+  it:
+  science:
+  files:
+  social media:
 
 engines:
-  # Enable specific engines as needed
-  - name: duckduckgo
-    disabled: false
-  - name: wikipedia
-    disabled: false
-  - name: arxiv
-    disabled: false
+  # ── General ──────────────────────────────────────────────────────────────
+  - name: google
+    engine: google
+    shortcut: go
 
-redis:
-  url: redis://valkey:6379/0
+  - name: google images
+    engine: google_images
+    shortcut: goi
+
+  - name: google news
+    engine: google_news
+    shortcut: gon
+
+  - name: google videos
+    engine: google_videos
+    shortcut: gov
+
+  - name: google scholar
+    engine: google_scholar
+    shortcut: gos
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+
+  - name: duckduckgo images
+    engine: duckduckgo_extra
+    categories: [images]
+    ddg_category: images
+    shortcut: ddi
+
+  - name: duckduckgo videos
+    engine: duckduckgo_extra
+    categories: [videos]
+    ddg_category: videos
+    shortcut: ddv
+
+  - name: duckduckgo news
+    engine: duckduckgo_extra
+    categories: [news]
+    ddg_category: news
+    shortcut: ddn
+
+  - name: brave
+    engine: brave
+    shortcut: br
+    time_range_support: true
+    paging: true
+    categories: [general, web]
+    brave_category: search
+
+  - name: brave.images
+    engine: brave
+    network: brave
+    shortcut: brimg
+    categories: [images, web]
+    brave_category: images
+
+  - name: brave.videos
+    engine: brave
+    network: brave
+    shortcut: brvid
+    categories: [videos, web]
+    brave_category: videos
+
+  - name: brave.news
+    engine: brave
+    network: brave
+    shortcut: brnews
+    categories: news
+    brave_category: news
+
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: true
+
+  - name: bing images
+    engine: bing_images
+    shortcut: bii
+
+  - name: bing news
+    engine: bing_news
+    shortcut: bin
+
+  - name: bing videos
+    engine: bing_videos
+    shortcut: biv
+
+  - name: startpage
+    engine: startpage
+    shortcut: sp
+    startpage_categ: web
+    categories: [general, web]
+
+  - name: startpage news
+    engine: startpage
+    startpage_categ: news
+    categories: [news, web]
+    shortcut: spn
+
+  - name: startpage images
+    engine: startpage
+    startpage_categ: images
+    categories: [images, web]
+    shortcut: spi
+
+  # ── Knowledge / Encyclopaedia ─────────────────────────────────────────
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    display_type: ["infobox"]
+    categories: [general]
+
+  - name: wikidata
+    engine: wikidata
+    shortcut: wd
+    timeout: 3.0
+    weight: 2
+    display_type: ["infobox"]
+    categories: [general]
+
+  - name: wiktionary
+    engine: mediawiki
+    shortcut: wt
+    categories: [dictionaries, wikimedia]
+    base_url: "https://{language}.wiktionary.org/"
+    search_type: text
+
+  # ── IT / Development ─────────────────────────────────────────────────
+  - name: github
+    engine: github
+    shortcut: gh
+
+  - name: stackoverflow
+    engine: stackexchange
+    shortcut: st
+    api_site: 'stackoverflow'
+    categories: [it, q&a]
+
+  - name: askubuntu
+    engine: stackexchange
+    shortcut: ubuntu
+    api_site: 'askubuntu'
+    categories: [it, q&a]
+
+  - name: superuser
+    engine: stackexchange
+    shortcut: su
+    api_site: 'superuser'
+    categories: [it, q&a]
+
+  - name: mdn
+    shortcut: mdn
+    engine: json_engine
+    categories: [it]
+    paging: true
+    search_url: https://developer.mozilla.org/api/v1/search?q={query}&page={pageno}
+    results_query: documents
+    url_query: mdn_url
+    url_prefix: https://developer.mozilla.org
+    title_query: title
+    content_query: summary
+
+  - name: docker hub
+    engine: docker_hub
+    shortcut: dh
+    categories: [it, packages]
+
+  - name: pypi
+    shortcut: pypi
+    engine: pypi
+
+  - name: npm
+    engine: npm
+    shortcut: npm
+    timeout: 5.0
+    disabled: true
+
+  - name: arch linux wiki
+    engine: archlinux
+    shortcut: al
+
+  - name: nixos wiki
+    engine: mediawiki
+    shortcut: nixw
+    base_url: https://wiki.nixos.org/
+    search_type: text
+    disabled: true
+    categories: [it, software wikis]
+
+  - name: hackernews
+    engine: hackernews
+    shortcut: hn
+    disabled: true
+
+  - name: lobste.rs
+    engine: xpath
+    search_url: https://lobste.rs/search?q={query}&what=stories&order=relevance
+    results_xpath: //li[contains(@class, "story")]
+    url_xpath: .//a[@class="u-url"]/@href
+    title_xpath: .//a[@class="u-url"]
+    content_xpath: .//a[@class="domain"]
+    categories: it
+    shortcut: lo
+    timeout: 5.0
+    disabled: true
+
+  # ── Science / Research ───────────────────────────────────────────────
+  - name: arxiv
+    engine: arxiv
+    shortcut: arx
+
+  - name: semantic scholar
+    engine: semantic_scholar
+    shortcut: se
+
+  - name: pubmed
+    engine: pubmed
+    shortcut: pub
+
+  - name: crossref
+    engine: crossref
+    shortcut: cr
+    timeout: 30
+    disabled: true
+
+  # ── HuggingFace ──────────────────────────────────────────────────────
+  - name: huggingface
+    engine: huggingface
+    shortcut: hf
+    disabled: false            # enabled — useful for AI model search
+
+  - name: huggingface datasets
+    huggingface_endpoint: datasets
+    engine: huggingface
+    shortcut: hfd
+    disabled: true
+
+  - name: huggingface spaces
+    huggingface_endpoint: spaces
+    engine: huggingface
+    shortcut: hfs
+    disabled: true
+
+  # ── Maps ─────────────────────────────────────────────────────────────
+  - name: openstreetmap
+    engine: openstreetmap
+    shortcut: osm
+
+  - name: photon
+    engine: photon
+    shortcut: ph
+
+  # ── Media ────────────────────────────────────────────────────────────
+  - name: youtube
+    shortcut: yt
+    engine: youtube_noapi
+
+  - name: vimeo
+    engine: vimeo
+    shortcut: vm
+
+  - name: dailymotion
+    engine: dailymotion
+    shortcut: dm
+
+  - name: bandcamp
+    engine: bandcamp
+    shortcut: bc
+    categories: music
+
+  - name: soundcloud
+    engine: soundcloud
+    shortcut: sc
+
+  - name: mixcloud
+    engine: mixcloud
+    shortcut: mc
+
+  - name: sepiasearch
+    engine: sepiasearch
+    shortcut: sep
+
+  - name: openverse
+    engine: openverse
+    categories: images
+    shortcut: opv
+
+  - name: flickr
+    categories: images
+    shortcut: fl
+    engine: flickr_noapi
+
+  - name: unsplash
+    engine: unsplash
+    shortcut: us
+
+  - name: wikicommons.images
+    engine: wikicommons
+    shortcut: wci
+    categories: images
+    wc_search_type: image
+
+  - name: wikicommons.videos
+    engine: wikicommons
+    shortcut: wcv
+    categories: videos
+    wc_search_type: video
+
+  - name: wikicommons.audio
+    engine: wikicommons
+    shortcut: wca
+    categories: music
+    wc_search_type: audio
+
+  - name: wikicommons.files
+    engine: wikicommons
+    shortcut: wcf
+    categories: files
+    wc_search_type: file
+
+  # ── Utilities ────────────────────────────────────────────────────────
+  - name: currency
+    engine: currency_convert
+    shortcut: cc
+
+  - name: openstreetmap
+    engine: openstreetmap
+    shortcut: osm
+    disabled: true  # duplicate — kept for shortcut reference
+
+  - name: wttr.in
+    engine: wttr
+    shortcut: wttr
+    timeout: 9.0
+
+  - name: wolframalpha
+    shortcut: wa
+    engine: wolframalpha_noapi
+    timeout: 6.0
+    categories: general
+    disabled: true
+
+  - name: mymemory translated
+    engine: translated
+    shortcut: tl
+    timeout: 5.0
+
+  - name: lingva
+    engine: lingva
+    shortcut: lv
+
+  - name: genius
+    engine: genius
+    shortcut: gen
+
+  # ── Files / Torrents ─────────────────────────────────────────────────
+  - name: piratebay
+    engine: piratebay
+    shortcut: tpb
+    url: https://thepiratebay.org/
+    timeout: 3.0
+
+  - name: bt4g
+    engine: bt4g
+    shortcut: bt4g
+
+  - name: kickass
+    engine: kickass
+    base_url:
+      - https://kickasstorrents.to
+      - https://kickasstorrents.cr
+    shortcut: kc
+    timeout: 4.0
+
+  - name: openlibrary
+    engine: openlibrary
+    shortcut: ol
+    timeout: 10
+    disabled: true
+
+  - name: annas archive
+    engine: annas_archive
+    base_url:
+      - https://annas-archive.li
+      - https://annas-archive.pm
+    disabled: true
+    shortcut: aa
+    timeout: 5
+
+  # ── Social ────────────────────────────────────────────────────────────
+  - name: mastodon users
+    engine: mastodon
+    mastodon_type: accounts
+    base_url: https://mastodon.social
+    shortcut: mau
+
+  - name: mastodon hashtags
+    engine: mastodon
+    mastodon_type: hashtags
+    base_url: https://mastodon.social
+    shortcut: mah
+
+  - name: lemmy communities
+    engine: lemmy
+    lemmy_type: Communities
+    shortcut: leco
+
+  - name: lemmy posts
+    engine: lemmy
+    network: lemmy communities
+    lemmy_type: Posts
+    shortcut: lepo
+
+  - name: reddit
+    engine: reddit
+    shortcut: re
+    page_size: 25
+    disabled: true
+
+  - name: tootfinder
+    engine: tootfinder
+    shortcut: toot
+
+  # ── News ──────────────────────────────────────────────────────────────
+  - name: yahoo news
+    engine: yahoo_news
+    shortcut: yhn
+
+  - name: wikinews
+    engine: mediawiki
+    shortcut: wn
+    categories: [news, wikimedia]
+    base_url: "https://{language}.wikinews.org/"
+    search_type: text
+    srsort: create_timestamp_desc
+
+  - name: reuters
+    engine: reuters
+    shortcut: reu
+
+  # ── Podcasts ──────────────────────────────────────────────────────────
+  - name: podcastindex
+    engine: podcastindex
+    shortcut: podcast
+
+  - name: radio browser
+    engine: radio_browser
+    shortcut: rb
+
+doi_resolvers:
+  oadoi.org: 'https://oadoi.org/'
+  doi.org: 'https://doi.org/'
+  sci-hub.se: 'https://sci-hub.se/'
+
+default_doi_resolver: 'oadoi.org'

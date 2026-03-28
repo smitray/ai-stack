@@ -1,49 +1,55 @@
 #!/usr/bin/env bash
+#
+# bin/ai-stack — AI Stack Management CLI
+#
+# Installed to: ~/.local/bin/ai-stack
+# Source of truth: ~/.config/ai-stack/lib/common.sh
+#
 set -e
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Load shared constants and helpers
+_COMMON="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack/lib/common.sh"
+if [ ! -f "$_COMMON" ]; then
+    echo "ERROR: common.sh not found at $_COMMON"
+    echo "Run: ai-stack install base"
+    exit 1
+fi
+# shellcheck source=/dev/null
+source "$_COMMON"
 
-# VRAM Management URLs
-LLAMA_CPP_URL="${LLAMA_CPP_URL:-http://localhost:7865}"
-WHISPER_URL="${WHISPER_URL:-http://localhost:7861}"
+# Compose file lives in XDG config (installed by install base)
+COMPOSE_FILE="$AI_STACK_CONFIG_DIR/compose.yaml"
 
 COMMAND=$1
 shift || true
 
 case "$COMMAND" in
     up)
-        cd "$REPO_ROOT"
-        if [ -f "$HOME/.zshenv" ]; then set -a; source "$HOME/.zshenv"; set +a; fi
-        podman compose -f containers/compose.yaml up -d
+        load_env
+        podman compose -f "$COMPOSE_FILE" up -d
         ;;
     down)
-        cd "$REPO_ROOT"
-        podman compose -f containers/compose.yaml down
+        podman compose -f "$COMPOSE_FILE" down
         ;;
     restart)
-        cd "$REPO_ROOT"
-        if [ -f "$HOME/.zshenv" ]; then set -a; source "$HOME/.zshenv"; set +a; fi
-        podman compose -f containers/compose.yaml restart "$@"
+        load_env
+        podman compose -f "$COMPOSE_FILE" restart "$@"
         ;;
     status)
-        cd "$REPO_ROOT"
-        podman compose -f containers/compose.yaml ps
+        podman compose -f "$COMPOSE_FILE" ps
         ;;
     logs)
-        cd "$REPO_ROOT"
-        podman compose -f containers/compose.yaml logs -f "$@"
+        podman compose -f "$COMPOSE_FILE" logs -f "$@"
         ;;
     gpu)
         MODE=$1
         case "$MODE" in
             stt)
-                # Switch to STT mode with VRAM check
                 ai-stack vram stt
                 systemctl --user stop llama-cpp || true
                 systemctl --user start whisper-server
                 ;;
             llm)
-                # Switch to LLM mode with VRAM check
                 ai-stack vram llm
                 systemctl --user stop whisper-server || true
                 systemctl --user start llama-cpp
@@ -62,72 +68,64 @@ case "$COMMAND" in
         esac
         ;;
     vram)
-        # VRAM management commands
         VRAM_ACTION="${1:-status}"
         shift || true
-        
+
         case "$VRAM_ACTION" in
             stt)
-                # Ensure VRAM ready for STT (unload LLM)
                 echo "Checking VRAM for STT..."
                 loaded_model=$(curl -sf "$LLAMA_CPP_URL/models" 2>/dev/null | \
                     jq -r '.data[]? | select(.status == "loaded") | .id' 2>/dev/null | head -1)
-                
+
                 if [[ -n "$loaded_model" ]]; then
                     echo "LLM loaded ($loaded_model), unloading..."
                     curl -sf -X POST "$LLAMA_CPP_URL/models/unload" \
                         -H "Content-Type: application/json" \
-                        -d '{"model": "'$loaded_model'"}' >/dev/null 2>&1 || true
+                        -d '{}' >/dev/null 2>&1 || true
                     sleep 1
                     echo "✓ LLM unloaded"
                 else
                     echo "✓ No LLM loaded"
                 fi
-                
-                # Write state
+
                 echo "{\"active\": \"stt\", \"timestamp\": $(date +%s)}" > \
-                    /run/user/$(id -u)/ai-stack-vram-state 2>/dev/null || true
+                    "$VRAM_STATE_FILE" 2>/dev/null || true
                 echo "✓ VRAM ready for STT"
                 ;;
             llm)
-                # Ensure VRAM ready for LLM (wait for STT)
                 echo "Checking VRAM for LLM..."
-                
-                # Check state file
-                if [[ -f /run/user/$(id -u)/ai-stack-vram-state ]]; then
-                    state=$(cat /run/user/$(id -u)/ai-stack-vram-state 2>/dev/null)
+
+                if [[ -f "$VRAM_STATE_FILE" ]]; then
+                    state=$(cat "$VRAM_STATE_FILE" 2>/dev/null)
                     active=$(echo "$state" | jq -r '.active' 2>/dev/null)
                     timestamp=$(echo "$state" | jq -r '.timestamp' 2>/dev/null)
-                    elapsed=$(($(date +%s) - timestamp))
-                    
+                    elapsed=$(( $(date +%s) - timestamp ))
+
                     if [[ "$active" == "stt" && $elapsed -lt 30 ]]; then
                         echo "STT recently active (${elapsed}s ago), waiting..."
                         sleep 2
                     fi
                 fi
-                
-                # Write state
+
                 echo "{\"active\": \"llm\", \"timestamp\": $(date +%s)}" > \
-                    /run/user/$(id -u)/ai-stack-vram-state 2>/dev/null || true
+                    "$VRAM_STATE_FILE" 2>/dev/null || true
                 echo "✓ VRAM ready for LLM"
                 ;;
             status)
                 echo ""
                 echo "=== AI Stack VRAM Status ==="
                 echo ""
-                
-                # State file
-                if [[ -f /run/user/$(id -u)/ai-stack-vram-state ]]; then
-                    state=$(cat /run/user/$(id -u)/ai-stack-vram-state 2>/dev/null)
+
+                if [[ -f "$VRAM_STATE_FILE" ]]; then
+                    state=$(cat "$VRAM_STATE_FILE" 2>/dev/null)
                     active=$(echo "$state" | jq -r '.active' 2>/dev/null)
                     timestamp=$(echo "$state" | jq -r '.timestamp' 2>/dev/null)
-                    elapsed=$(($(date +%s) - timestamp))
+                    elapsed=$(( $(date +%s) - timestamp ))
                     echo "Active service: $active (${elapsed}s ago)"
                 else
                     echo "Active service: none (no state file)"
                 fi
-                
-                # llama.cpp status
+
                 loaded_model=$(curl -sf "$LLAMA_CPP_URL/models" 2>/dev/null | \
                     jq -r '.data[]? | select(.status == "loaded") | .id' 2>/dev/null | head -1)
                 if [[ -n "$loaded_model" ]]; then
@@ -135,15 +133,13 @@ case "$COMMAND" in
                 else
                     echo "LLM: unloaded"
                 fi
-                
-                # Whisper status
+
                 if curl -sf "$WHISPER_URL/health" >/dev/null 2>&1; then
                     echo "STT: healthy"
                 else
                     echo "STT: not responding"
                 fi
-                
-                # VRAM usage
+
                 if command -v nvidia-smi &>/dev/null; then
                     echo ""
                     nvidia-smi --query-gpu=memory.used,memory.free --format=csv
@@ -151,20 +147,21 @@ case "$COMMAND" in
                 echo ""
                 ;;
             state)
-                if [[ -f /run/user/$(id -u)/ai-stack-vram-state ]]; then
-                    cat /run/user/$(id -u)/ai-stack-vram-state | jq .
+                if [[ -f "$VRAM_STATE_FILE" ]]; then
+                    jq . "$VRAM_STATE_FILE"
                 else
                     echo "No state file found"
                 fi
                 ;;
             clear)
-                rm -f /run/user/$(id -u)/ai-stack-vram-state 2>/dev/null || true
+                rm -f "$VRAM_STATE_FILE" 2>/dev/null || true
                 echo "✓ State cleared"
                 ;;
             history)
-                if [[ -f /run/user/$(id -u)/ai-stack-vram-history.log ]]; then
+                HISTORY="${VRAM_STATE_FILE%.state}-history.log"
+                if [[ -f "$HISTORY" ]]; then
                     echo "=== VRAM Switch History ==="
-                    tail -20 /run/user/$(id -u)/ai-stack-vram-history.log
+                    tail -20 "$HISTORY"
                 else
                     echo "No history available"
                 fi
@@ -176,43 +173,26 @@ case "$COMMAND" in
         esac
         ;;
     install)
-        cd "$REPO_ROOT"
-        export REPO_ROOT
-        case "$1" in
-            stt)
-                bash bare-metal/stt/install.sh
-                ;;
-            llama-cpp)
-                bash bare-metal/llama-cpp/install.sh
-                ;;
-            containers)
-                if [ -f "$HOME/.zshenv" ]; then set -a; source "$HOME/.zshenv"; set +a; fi
-                podman compose -f containers/compose.yaml pull
-                podman compose -f containers/compose.yaml up -d
-                ;;
-            all)
-                bash lib/install-base.sh
-                bash bare-metal/llama-cpp/install.sh
-                bash bare-metal/stt/install.sh
-                if [ -f "$HOME/.zshenv" ]; then set -a; source "$HOME/.zshenv"; set +a; fi
-                podman compose -f containers/compose.yaml pull
-                podman compose -f containers/compose.yaml up -d
-                ;;
-            *)
-                echo "Usage: ai-stack install {stt|llama-cpp|containers|all}"
-                exit 1
-                ;;
-        esac
+        echo "ERROR: 'ai-stack install' is not available from the installed CLI."
+        echo ""
+        echo "Installation is done from the repo. Run:"
+        echo "  bash /path/to/ai-stack/lib/install-base.sh"
+        echo ""
+        echo "Component installers:"
+        echo "  bash /path/to/ai-stack/bare-metal/llama-cpp/install.sh"
+        echo "  bash /path/to/ai-stack/bare-metal/stt/install.sh"
+        echo "  bash /path/to/ai-stack/bare-metal/stt-proxy/install.sh"
+        exit 1
         ;;
     models)
-        if [ -f "$HOME/.zshenv" ]; then set -a; source "$HOME/.zshenv"; set +a; fi
+        load_env
         case "$1" in
             list)
                 echo "=== Downloaded Models (HF Cache) ==="
                 if command -v hf &>/dev/null; then
                     hf cache ls
                 else
-                    echo "HF CLI not installed. Run: pip install -U huggingface_hub[cli]"
+                    echo "HF CLI not installed. Run: ai-stack install base"
                     exit 1
                 fi
                 ;;
@@ -220,14 +200,14 @@ case "$COMMAND" in
                 echo "=== Model Download Status ==="
                 echo ""
                 echo "STT Model: deepdml/faster-whisper-large-v3-turbo-ct2"
-                if [ -d "$HOME/.cache/huggingface/hub/models--deepdml--faster-whisper-large-v3-turbo-ct2" ]; then
+                if [ -d "${HF_HOME:-$HOME/.cache/huggingface}/hub/models--deepdml--faster-whisper-large-v3-turbo-ct2" ]; then
                     echo "  Status: Downloaded"
                 else
                     echo "  Status: Not downloaded"
                 fi
                 echo ""
                 echo "LLM Model: unsloth/Qwen3.5-4B-GGUF:Q4_K_M"
-                if [ -d "$HOME/.cache/huggingface/hub/models--unsloth--Qwen3.5-4B-GGUF" ]; then
+                if [ -d "${HF_HOME:-$HOME/.cache/huggingface}/hub/models--unsloth--Qwen3.5-4B-GGUF" ]; then
                     echo "  Status: Downloaded"
                 else
                     echo "  Status: Not downloaded"
@@ -236,65 +216,42 @@ case "$COMMAND" in
             download)
                 if [ -z "$2" ]; then
                     echo "Usage: ai-stack models download <hf-repo>"
-                    echo "Examples:"
-                    echo "  ai-stack models download deepdml/faster-whisper-large-v3-turbo-ct2"
-                    echo "  ai-stack models download unsloth/Qwen3.5-4B-GGUF:Q4_K_M"
                     exit 1
                 fi
                 if ! command -v hf &>/dev/null; then
-                    echo "Installing HuggingFace CLI..."
                     pip install -U "huggingface_hub[cli]" --quiet
                 fi
-                if [ -n "$HF_TOKEN" ]; then
-                    hf auth login --token "$HF_TOKEN" || true
-                fi
-                echo "Downloading $2..."
+                [ -n "$HF_TOKEN" ] && hf auth login --token "$HF_TOKEN" || true
                 hf download "$2"
-                echo "Download complete!"
                 ;;
             add-llama)
                 if [ -z "$2" ] || [ -z "$3" ]; then
                     echo "Usage: ai-stack models add-llama <name> <hf-repo> [--ctx-size 4096]"
-                    echo "Example:"
-                    echo "  ai-stack models add-llama qwen-3b-chat unsloth/Qwen3.5-4B-GGUF:Q4_K_M"
                     exit 1
                 fi
-                CONFIG_DIR="${AI_STACK_CONFIG_DIR:-$HOME/.config/ai-stack}/llama-cpp"
-                PRESETS_FILE="$CONFIG_DIR/presets.ini"
+                PRESETS_FILE="$AI_STACK_CONFIG_DIR/llama-cpp/presets.ini"
                 if [ ! -f "$PRESETS_FILE" ]; then
                     echo "Error: presets.ini not found. Run: ai-stack install llama-cpp"
                     exit 1
                 fi
-                NAME="$2"
-                HF_REPO="$3"
-                CTX_SIZE="${4:-4096}"
-                echo "Adding model to presets.ini: $NAME"
-                cat >> "$PRESETS_FILE" << EOF
+                NAME="$2"; HF_REPO="$3"; CTX_SIZE="${4:-4096}"
+                cat >> "$PRESETS_FILE" <<EOF
 
 [$NAME]
 hf-repo = $HF_REPO
 ctx-size = $CTX_SIZE
 EOF
-                echo "Model added. Restart llama-cpp to load."
+                echo "Model added. Restart llama-cpp to apply."
                 ;;
             cleanup)
                 if [ "$2" = "--dry-run" ]; then
-                    echo "Dry run - no changes"
                     hf cache prune --dry-run 2>/dev/null || hf cache ls
                 else
-                    echo "Cleaning up HF cache..."
                     hf cache prune
                 fi
                 ;;
             *)
                 echo "Usage: ai-stack models {list|status|download|add-llama|cleanup}"
-                echo ""
-                echo "Commands:"
-                echo "  list                    - List downloaded models"
-                echo "  status                  - Check model download status"
-                echo "  download <repo>         - Download specific model"
-                echo "  add-llama <n> <repo>    - Add llama.cpp model to presets"
-                echo "  cleanup [--dry-run]     - Cleanup HF cache"
                 exit 1
                 ;;
         esac
@@ -311,35 +268,16 @@ Commands:
   restart         Restart containers
   status          Show container status
   logs            View container logs
-  gpu             GPU mode management (stt|llm|off|status)
-  vram            VRAM orchestration (stt|llm|status|state|clear|history)
-  install         Install components (stt|llama-cpp|containers|all|base)
+  gpu             GPU mode (stt|llm|off|status)
+  vram            VRAM state (stt|llm|status|state|clear|history)
   models          Model management (list|status|download|add-llama|cleanup)
-  help            Show this help
-
-VRAM Commands:
-  ai-stack vram stt       - Unload LLM, prepare for STT
-  ai-stack vram llm       - Wait for STT, prepare for LLM
-  ai-stack vram status    - Show VRAM status (state + services + usage)
-  ai-stack vram state     - Show state file content
-  ai-stack vram clear     - Clear state file
-  ai-stack vram history   - Show VRAM switch history
-
-GPU Commands:
-  ai-stack gpu stt        - Switch to STT mode (with VRAM check)
-  ai-stack gpu llm        - Switch to LLM mode (with VRAM check)
-  ai-stack gpu off        - Stop all GPU services
-  ai-stack gpu status     - Show GPU and service status
-
-Examples:
-  ai-stack vram status    # Check current VRAM state
-  ai-stack vram stt       # Prepare for STT (unload LLM)
-  ai-stack gpu llm        # Switch to LLM mode
-  ai-stack up             # Start all containers
 
 Environment Variables:
-  LLAMA_CPP_URL   llama.cpp URL (default: http://localhost:7865)
   WHISPER_URL     Whisper STT URL (default: http://localhost:7861)
+  LLAMA_CPP_URL   llama.cpp URL   (default: http://localhost:7865)
+
+Config: $AI_STACK_CONFIG_DIR
+Data:   $AI_STACK_DATA_DIR
 EOF
         exit 0
         ;;
