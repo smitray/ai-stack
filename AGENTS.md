@@ -41,7 +41,8 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 ai-stack/
 ├── bare-metal/
 │   ├── stt/           # Whisper STT server + client
-│   └── llama-cpp/     # Local LLM server (OpenAI-compatible API)
+│   ├── llama-cpp/     # Local LLM server (OpenAI-compatible API)
+│   └── doclific/      # AI documentation service (inactive by default, port 7864)
 ├── containers/
 │   ├── compose.yaml   # Podman services
 │   ├── open-webui/    # Chat UI (connects directly to llama.cpp)

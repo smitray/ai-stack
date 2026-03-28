@@ -80,10 +80,14 @@ ai-stack/
 │   │   ├── systemd/
 │   │   └── install.sh
 │   │
-│   └── llama-cpp/                  # Local LLM server
+│   ├── llama-cpp/                  # Local LLM server
 │       ├── config/
 │       │   ├── llama-cpp.service
 │       │   └── presets.ini         # Router mode config
+│       └── install.sh
+│   │
+│   └── doclific/                   # Local AI documentation tool
+│       ├── systemd/
 │       └── install.sh
 │
 ├── containers/
@@ -128,10 +132,18 @@ ai-stack/
 
 ### Installation
 
+**One-liner Installation:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/smitray/ai-stack/main/install.sh | bash
+```
+
+**Manual Installation:**
+
 ```bash
 # 1. Clone repository
-git clone <repo-url> ~/workspace/ai-stack
-cd ~/workspace/ai-stack
+git clone https://github.com/smitray/ai-stack.git ~/ai-stack
+cd ~/ai-stack
 
 # 2. Run base installation
 bash lib/install-base.sh
@@ -376,6 +388,12 @@ hf cache ls
 | **Whisper STT** | 7861 | ~1.5-2 GB | Speech-to-text via Faster-Whisper |
 | **llama.cpp Router** | 7865 | ~2-2.5 GB | Local LLM inference (OpenAI-compatible API) |
 | **STT Proxy** | 7866 | None | VRAM orchestration for Open WebUI |
+
+### Bare-Metal Services (CPU)
+
+| Service | Port | Memory Limit | Purpose |
+|---------|------|--------------|---------|
+| **Doclific** | 7864 | None | Local documentation tool with AI support (inactive by default) |
 
 ### Container Services (CPU)
 
