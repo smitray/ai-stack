@@ -13,7 +13,7 @@ services:
         volume:
           nocopy: false
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aistack"]
+      test: [ "CMD-SHELL", "pg_isready -U aistack" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -33,7 +33,7 @@ services:
         volume:
           nocopy: false
     healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
+      test: [ "CMD", "valkey-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -61,7 +61,7 @@ services:
         volume:
           nocopy: false
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6333/readyz || exit 1"]
+      test: [ "CMD-SHELL", "curl -f http://localhost:6333/readyz || exit 1" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -83,16 +83,11 @@ services:
     environment:
       - BASE_URL=http://localhost:7863/
       - SEARXNG_SECRET=${SEARXNG_SECRET:?SEARXNG_SECRET not set}
-      # User-Agent: makes outgoing requests look like a real browser.
-      # USER_AGENT is a non-standard SearXNG var that worked in POC testing.
-      # SEARXNG_OUTGOING__USERAGENT_SUFFIX is the official env var (appends to SearXNG UA).
-      - USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36
-      - SEARXNG_OUTGOING__USERAGENT_SUFFIX=Chrome/122.0.0.0
     depends_on:
       valkey:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz || exit 1"]
+      test: [ "CMD-SHELL", "curl -f http://localhost:8080/healthz || exit 1" ]
       interval: 5s
       timeout: 5s
       retries: 5
