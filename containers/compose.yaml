@@ -83,6 +83,11 @@ services:
     environment:
       - BASE_URL=http://localhost:7863/
       - SEARXNG_SECRET=${SEARXNG_SECRET:?SEARXNG_SECRET not set}
+      # User-Agent: makes outgoing requests look like a real browser.
+      # USER_AGENT is a non-standard SearXNG var that worked in POC testing.
+      # SEARXNG_OUTGOING__USERAGENT_SUFFIX is the official env var (appends to SearXNG UA).
+      - USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36
+      - SEARXNG_OUTGOING__USERAGENT_SUFFIX=Chrome/122.0.0.0
     depends_on:
       valkey:
         condition: service_healthy
