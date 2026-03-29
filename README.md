@@ -64,8 +64,7 @@ GPU services are **mutually exclusive** — only one can hold VRAM at a time:
 ```
 ai-stack/
 ├── bin/
-│   ├── ai-stack                    # Main management CLI
-│   └── llama-router                # llama.cpp router management
+│   └── ai-stack                    # Main management CLI
 │
 ├── bare-metal/
 │   ├── stt/                        # Whisper STT server
@@ -311,14 +310,13 @@ whisper-client vram            # Show GPU VRAM usage
 whisper-client wait-ready      # Wait for server to be ready
 ```
 
-### llama.cpp Router CLI (llama-router)
+### llama.cpp Management (ai-stack gpu)
 
 ```bash
-llama-router models            # List all models with status
-llama-router load <model>      # Load specific model
-llama-router unload [model]    # Unload current model
-llama-router status            # Show router status
-llama-router health            # Check health endpoint
+ai-stack gpu status            # Show GPU usage and model
+ai-stack gpu llm               # Activate LLM
+ai-stack gpu stt               # Activate STT
+ai-stack gpu off               # Free all VRAM
 ```
 
 ### Systemd Service Management
@@ -435,9 +433,9 @@ watch -n1 nvidia-smi
 nvidia-smi
 
 # Force unload
-ai-stack vram stt
+ai-stack gpu off
 # or
-llama-router unload
+systemctl --user stop whisper-server llama-cpp
 
 # Stop services
 systemctl --user stop whisper-server llama-cpp

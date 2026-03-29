@@ -55,13 +55,13 @@ ExecStart=llama-server \
 
 ### 3. Management CLI
 
-**File:** `bin/llama-router`
+**File:** `bin/ai-stack`
 
 ```bash
-llama-router status      # Show router status
-llama-router models      # List models
-llama-router unload      # Unload model
-llama-router load <name> # Load model
+ai-stack gpu status      # Show GPU usage
+ai-stack gpu llm         # Activate LLM
+ai-stack gpu stt         # Activate STT
+ai-stack gpu off         # Free all VRAM
 ```
 
 ---
@@ -134,7 +134,7 @@ test-router-mode.sh  # Test all endpoints
 | `templates/zshenv.template` | Environment template |
 | `bare-metal/stt-proxy/test-router-mode.sh` | Test suite |
 | `bare-metal/stt-proxy/README.md` | Documentation |
-| `bin/llama-router` | Management CLI |
+| `bin/ai-stack` | Main management CLI |
 | `bare-metal/stt/scripts/whisper-activity` | Activity tracking |
 | `bare-metal/stt/scripts/whisper-client` | Comprehensive CLI |
 
@@ -152,15 +152,15 @@ test-router-mode.sh  # Test all endpoints
 
 ```bash
 # Base installation
-ai-stack install base
+bash lib/install-base.sh
+
+# Install LLM
+bash bare-metal/llama-cpp/install.sh
 
 # Install STT
-ai-stack install stt
+bash bare-metal/stt/install.sh
 
-# Install llama.cpp
-ai-stack install llama-cpp
-
-# Install STT Proxy
+# Install STT Proxy (optional)
 bash bare-metal/stt-proxy/install.sh
 systemctl --user start stt-proxy
 
@@ -177,9 +177,8 @@ systemctl --user start llama-cpp whisper-server stt-proxy
 test-router-mode.sh
 
 # Test llama.cpp router
-llama-router status
-llama-router models
-llama-router unload
+curl http://localhost:7865/models
+curl -X POST http://localhost:7865/models/unload
 
 # Test STT Proxy
 curl http://localhost:7866/health
@@ -260,7 +259,7 @@ journalctl --user -u stt-proxy -f
 ### VRAM not freeing
 ```bash
 nvidia-smi
-llama-router unload
+ai-stack gpu off
 curl -X POST http://localhost:7865/models/unload
 ```
 

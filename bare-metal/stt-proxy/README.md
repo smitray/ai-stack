@@ -49,9 +49,9 @@ systemctl --user status llama-cpp stt-proxy
 test-router-mode.sh
 
 # Or use the management CLI
-llama-router status
-llama-router models
-llama-router unload
+ai-stack gpu status
+ai-stack gpu off
+curl http://localhost:7865/models
 ```
 
 ### 4. Configure Open WebUI
@@ -134,19 +134,14 @@ curl -X POST http://localhost:7865/v1/chat/completions \
 
 ```bash
 # Status
-llama-router status
-
-# List models
-llama-router models
+ai-stack gpu status
 
 # Unload model
-llama-router unload
+ai-stack gpu off
 
-# Load model
-llama-router load unsloth/Qwen3.5-4B-GGUF:Q4_K_M
-
-# Health check
-llama-router health
+# Or via curl
+curl http://localhost:7865/models
+curl -X POST http://localhost:7865/models/unload
 ```
 
 ## STT Proxy
@@ -242,7 +237,7 @@ curl http://localhost:7866/health
 nvidia-smi
 
 # Manually unload
-llama-router unload
+ai-stack gpu off
 
 # Or via API
 curl -X POST http://localhost:7865/models/unload
@@ -291,5 +286,5 @@ tmux
 | `bare-metal/llama-cpp/config/presets.ini` | Router mode configuration |
 | `bare-metal/stt-proxy/stt_proxy.py` | STT Proxy application |
 | `bare-metal/stt-proxy/systemd/stt-proxy.service` | STT Proxy systemd service |
-| `bin/llama-router` | Router management CLI |
+| `bin/ai-stack` | Main management CLI |
 | `bare-metal/stt-proxy/test-router-mode.sh` | Test suite |
