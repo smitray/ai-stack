@@ -104,6 +104,15 @@ cp "$REPO_ROOT/containers/qdrant/config/production.yaml" "$AI_STACK_CONFIG_DIR/q
 echo "  Installed to $AI_STACK_CONFIG_DIR/compose.yaml"
 
 # ---------------------------------------------------------------------------
+# Configure journald retention (7 days)
+# ---------------------------------------------------------------------------
+echo "[6.5/8] Configuring journald retention..."
+JOURNALD_DIR="$HOME/.config/systemd/journald.conf.d"
+mkdir -p "$JOURNALD_DIR"
+cp "$REPO_ROOT/lib/journald-ai-stack.conf" "$JOURNALD_DIR/ai-stack.conf"
+echo "  Configured 7-day log retention"
+
+# ---------------------------------------------------------------------------
 # 7. Create XDG data directories (volume mounts)
 # ---------------------------------------------------------------------------
 echo "[7/8] Creating data directories..."
