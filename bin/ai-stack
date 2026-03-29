@@ -39,7 +39,73 @@ case "$COMMAND" in
         podman compose -f "$COMPOSE_FILE" ps
         ;;
     logs)
-        podman compose -f "$COMPOSE_FILE" logs -f "$@"
+        SERVICE="${1:-all}"
+        shift 2>/dev/null || true
+
+        case "$SERVICE" in
+            all)
+                echo -e "\033[0;34m=== AI Stack Logs ===\033[0m"
+                echo ""
+                # Bare-metal services
+                for svc in whisper-server llama-cpp stt-proxy; do
+                    if systemctl --user is-active "$svc" &>/dev/null; then
+                        echo -e "\033[1;33m[$svc]\033[0m"
+                        journalctl --user -u "$svc" -o short --no-pager -n 10 2>/dev/null || echo "  (no logs)"
+                        echo ""
+                    fi
+                done
+                # Container services
+                if [ -f "$COMPOSE_FILE" ]; then
+                    for ctr in $(podman compose -f "$COMPOSE_FILE" ps --services 2>/dev/null); do
+                        echo -e "\033[1;33m[$ctr]\033[0m"
+                        podman logs "$ctr" --tail=10 --no-log-group 2>/dev/null | head -10 || echo "  (no logs)"
+                        echo ""
+                    done
+                fi
+                ;;
+            errors)
+                echo -e "\033[0;31m=== Errors from all services ===\033[0m"
+                echo ""
+                for svc in whisper-server llama-cpp stt-proxy; do
+                    journalctl --user -u "$svc" -o short --no-pager -n 100 2>/dev/null | grep -iE "error|warn|fail|crit" && echo "" || true
+                done
+                if [ -f "$COMPOSE_FILE" ]; then
+                    for ctr in $(podman compose -f "$COMPOSE_FILE" ps --services 2>/dev/null); do
+                        podman logs "$ctr" --tail=100 2>/dev/null | grep -iE "error|warn|fail|crit" | sed "s/^/[$ctr] /" || true
+                    done
+                fi
+                ;;
+            whisper-server|llama-cpp|stt-proxy)
+                journalctl --user -u "$SERVICE" -o short --no-pager -n 100 "$@"
+                ;;
+            --help|-h)
+                echo "Usage: ai-stack logs [service|errors|--help]"
+                echo ""
+                echo "Services:"
+                echo "  whisper-server  STT service logs (journald)"
+                echo "  llama-cpp       LLM service logs (journald)"
+                echo "  stt-proxy       STT Proxy logs (journald)"
+                echo "  errors          Show errors from all services"
+                echo ""
+                echo "Container services (auto-detected from compose):"
+                for ctr in $(podman compose -f "$COMPOSE_FILE" ps --services 2>/dev/null); do
+                    echo "  $ctr"
+                done
+                echo ""
+                echo "Options:"
+                echo "  --since=1h      Time range"
+                echo "  -f              Follow mode"
+                ;;
+            *)
+                if [ -f "$COMPOSE_FILE" ] && podman compose -f "$COMPOSE_FILE" ps --services 2>/dev/null | grep -q "^$SERVICE$"; then
+                    podman logs "$SERVICE" --tail=100 "$@"
+                else
+                    echo "Unknown service: $SERVICE"
+                    echo "Run 'ai-stack logs --help' for available services"
+                    exit 1
+                fi
+                ;;
+        esac
         ;;
     gpu)
         MODE=$1
@@ -269,7 +335,7 @@ Commands:
   down            Stop all containers
   restart         Restart containers
   status          Show container status
-  logs            View container logs
+  logs            View logs (ai-stack logs [service|errors|--help])
   gpu             GPU mode (stt|llm|off|status)
   vram            VRAM state (stt|llm|status|state|clear|history)
   models          Model management (list|status|download|add-llama|cleanup)
