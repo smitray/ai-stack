@@ -154,8 +154,12 @@ bash lib/install-base.sh
 # 4. Source environment
 source ~/.zshenv
 
-# 5. Install all components
-ai-stack install all
+# 5. Install components
+bash ~/ai-stack/lib/install-base.sh
+bash ~/ai-stack/bare-metal/llama-cpp/install.sh
+bash ~/ai-stack/bare-metal/stt/install.sh
+bash ~/ai-stack/bare-metal/stt-proxy/install.sh  # optional
+ai-stack up  # Start containers
 ```
 
 ### Verify Installation

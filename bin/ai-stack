@@ -173,16 +173,18 @@ case "$COMMAND" in
         esac
         ;;
     install)
-        echo "ERROR: 'ai-stack install' is not available from the installed CLI."
+        echo "Installation is done via repo scripts, not the CLI."
         echo ""
-        echo "Installation is done from the repo. Run:"
-        echo "  bash /path/to/ai-stack/lib/install-base.sh"
+        echo "To install:"
+        echo "  1. Base setup:       bash ~/ai-stack/lib/install-base.sh"
+        echo "  2. LLM server:       bash ~/ai-stack/bare-metal/llama-cpp/install.sh"
+        echo "  3. STT server:       bash ~/ai-stack/bare-metal/stt/install.sh"
+        echo "  4. STT Proxy:        bash ~/ai-stack/bare-metal/stt-proxy/install.sh"
+        echo "  5. Start containers: ai-stack up"
         echo ""
-        echo "Component installers:"
-        echo "  bash /path/to/ai-stack/bare-metal/llama-cpp/install.sh"
-        echo "  bash /path/to/ai-stack/bare-metal/stt/install.sh"
-        echo "  bash /path/to/ai-stack/bare-metal/stt-proxy/install.sh"
-        exit 1
+        echo "Or use the one-liner:"
+        echo "  curl -fsSL https://.../install.sh | bash"
+        exit 0
         ;;
     models)
         load_env

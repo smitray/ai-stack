@@ -67,14 +67,17 @@ ai-stack/
 | `AGENTS.md` | This file |
 | `docs/prd/*.md` | Design specifications |
 | `docs/superpowers/plans/*.md` | Implementation plans |
-| `.env.example` | Environment template |
 | `bin/ai-stack` | Main management CLI |
 
 ## Common Tasks
 
 ```bash
 # Install everything
-ai-stack install all
+bash ~/ai-stack/lib/install-base.sh
+bash ~/ai-stack/bare-metal/llama-cpp/install.sh
+bash ~/ai-stack/bare-metal/stt/install.sh
+bash ~/ai-stack/bare-metal/stt-proxy/install.sh  # optional
+ai-stack up  # Start containers
 
 # Start/stop containers
 ai-stack up
@@ -156,7 +159,7 @@ ai-stack models status
 
 ### Default Models Installation
 
-During `ai-stack install all`:
+During `bash ~/ai-stack/lib/install-base.sh`:
 1. HF CLI installed globally via pip
 2. Authenticated with `HF_TOKEN` from `.env`
 3. Default models pre-downloaded to HF cache:
