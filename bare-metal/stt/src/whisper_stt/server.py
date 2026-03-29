@@ -34,7 +34,7 @@ def create_app(config: Config) -> FastAPI:
     model_loaded = False
 
     @app.on_event("startup")
-    async def startup_event():
+    async def startup_event() -> None:
         """Load model on startup if configured."""
         nonlocal model_loaded
         if config.model.load_on_startup:
@@ -45,17 +45,17 @@ def create_app(config: Config) -> FastAPI:
             logger.info("Server started (model will load on first request)")
 
     @app.on_event("shutdown")
-    async def shutdown_event():
+    async def shutdown_event() -> None:
         """Unload model on shutdown."""
         service.unload_model()
 
     @app.get("/health", response_model=HealthResponse)
-    async def health_check():
+    async def health_check() -> HealthResponse:
         """Simple health check."""
         return HealthResponse(status="healthy", model_loaded=service.is_model_loaded())
 
     @app.get("/ready", response_model=HealthResponse)
-    async def readiness_check():
+    async def readiness_check() -> HealthResponse:
         """Check if model is loaded and ready."""
         if not service.is_model_loaded():
             # Try to load model if not loaded (lazy loading)
@@ -65,12 +65,14 @@ def create_app(config: Config) -> FastAPI:
                     return HealthResponse(status="ready", model_loaded=True)
                 except Exception as e:
                     logger.error(f"Failed to load model: {e}")
-                    raise HTTPException(status_code=503, detail=f"Model load failed: {str(e)}")
+                    raise HTTPException(
+                        status_code=503, detail=f"Model load failed: {str(e)}"
+                    )
             raise HTTPException(status_code=503, detail="Model not loaded")
         return HealthResponse(status="ready", model_loaded=True)
 
     @app.get("/status", response_model=StatusResponse)
-    async def get_status():
+    async def get_status() -> StatusResponse:
         """Get detailed server status."""
         vram = _get_vram_info()
 
@@ -86,7 +88,7 @@ def create_app(config: Config) -> FastAPI:
         )
 
     @app.get("/vram", response_model=VRAMResponse)
-    async def get_vram():
+    async def get_vram() -> VRAMResponse:
         """Get GPU VRAM usage."""
         vram = _get_vram_info()
         return VRAMResponse(**vram)
@@ -97,14 +99,16 @@ def create_app(config: Config) -> FastAPI:
         model: Optional[str] = Form(None),
         language: Optional[str] = Form(None),
         response_format: Optional[str] = Form("json"),
-    ):
+    ) -> DetailedTranscriptionResponse | JSONResponse:
         """Transcribe audio file (OpenAI-compatible endpoint)."""
         # Lazy load model if not loaded
         if not service.is_model_loaded():
             try:
                 service.load_model()
             except Exception as e:
-                raise HTTPException(status_code=503, detail=f"Model load failed: {str(e)}")
+                raise HTTPException(
+                    status_code=503, detail=f"Model load failed: {str(e)}"
+                )
 
         # Validate file type
         if not file.content_type or not file.content_type.startswith("audio/"):
@@ -136,7 +140,7 @@ def create_app(config: Config) -> FastAPI:
             # Cleanup temp file
             tmp_path.unlink(missing_ok=True)
 
-    def _get_vram_info() -> dict:
+    def _get_vram_info() -> dict[str, int | float]:
         """Get GPU VRAM information."""
         try:
             import subprocess

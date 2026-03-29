@@ -149,7 +149,7 @@ async def transcribe_audio(
     model: str | None = Form(None),
     language: str | None = Form(None),
     response_format: str | None = Form("json"),
-):
+) -> JSONResponse:
     """
     Transcribe audio with automatic llama.cpp unloading.
 
@@ -207,13 +207,13 @@ async def transcribe_audio(
 
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy", "service": "stt-proxy"}
 
 
 @app.get("/status")
-async def get_status():
+async def get_status() -> dict[str, str]:
     """Get proxy and service status."""
     status = {"proxy": "running", "whisper_stt": "unknown", "llama_cpp": "unknown"}
 
