@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -96,10 +97,8 @@ async def unload_llama_model() -> dict:
 
 async def write_state(active: str) -> None:
     """Write VRAM state file."""
-    import os
-
     state_file = f"/run/user/{os.getuid()}/ai-stack-vram-state"
-    state = {"active": active, "timestamp": int(asyncio.get_event_loop().time())}
+    state = {"active": active, "timestamp": int(time.time())}
 
     try:
         run_dir = os.path.dirname(state_file)
