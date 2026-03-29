@@ -249,13 +249,13 @@ cmd_status() {
         status_json=$(curl -sf "$API_URL/status" 2>/dev/null || echo '{}')
         
         local model device compute loaded vram_used vram_total vram_percent
-        model=$(echo "$status_json" | grep -o '"model":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
-        device=$(echo "$status_json" | grep -o '"device":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
-        compute=$(echo "$status_json" | grep -o '"compute_type":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
-        loaded=$(echo "$status_json" | grep -o '"model_loaded":[a-z]*' | cut -d':' -f2 || echo "false")
-        vram_used=$(echo "$status_json" | grep -o '"used_mb":[0-9]*' | cut -d':' -f2 || echo "0")
-        vram_total=$(echo "$status_json" | grep -o '"total_mb":[0-9]*' | cut -d':' -f2 || echo "0")
-        vram_percent=$(echo "$status_json" | grep -o '"percent":[0-9.]*' | cut -d':' -f2 || echo "0")
+        model=$(echo "$status_json" | jq -r '.model // "unknown"')
+        device=$(echo "$status_json" | jq -r '.device // "unknown"')
+        compute=$(echo "$status_json" | jq -r '.compute_type // "unknown"')
+        loaded=$(echo "$status_json" | jq -r '.model_loaded // false')
+        vram_used=$(echo "$status_json" | jq -r '.used_mb // 0')
+        vram_total=$(echo "$status_json" | jq -r '.total_mb // 0')
+        vram_percent=$(echo "$status_json" | jq -r '.percent // 0')
         
         if [[ "$loaded" == "true" ]]; then
             echo "│ Status:     ${GREEN}● Running${NC}                       │"

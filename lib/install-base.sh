@@ -16,7 +16,7 @@ echo ""
 # 1. System dependencies
 # ---------------------------------------------------------------------------
 echo "[1/8] Checking system dependencies..."
-DEPENDENCIES=(podman podman-compose nvidia-container-toolkit base-devel cmake git cuda)
+DEPENDENCIES=(podman podman-compose nvidia-container-toolkit base-devel cmake git cuda jq)
 MISSING=()
 
 for pkg in "${DEPENDENCIES[@]}"; do
@@ -167,7 +167,7 @@ echo ""
 echo "Next steps:"
 echo "  1. Fill in API keys: $ZSHENV"
 echo "  2. source $ZSHENV"
-echo "  3. ai-stack install llama-cpp"
-echo "  4. ai-stack install stt"
+echo "  3. bash $REPO_ROOT/bare-metal/llama-cpp/install.sh"
+echo "  4. bash $REPO_ROOT/bare-metal/stt/install.sh"
 echo "  5. ai-stack up"
 echo ""
