@@ -19,6 +19,8 @@ from .service import TranscriptionService
 
 logger = logging.getLogger(__name__)
 
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
+
 
 def create_app(config: Config) -> FastAPI:
     """Create and configure FastAPI application."""
@@ -117,6 +119,11 @@ def create_app(config: Config) -> FastAPI:
         # Save uploaded file temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
             content = await file.read()
+            if len(content) > MAX_UPLOAD_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)} MB.",
+                )
             tmp.write(content)
             tmp_path = Path(tmp.name)
 
