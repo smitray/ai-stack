@@ -154,10 +154,9 @@ bash lib/install-base.sh
 source ~/.zshenv
 
 # 5. Install components
-bash ~/ai-stack/lib/install-base.sh
 bash ~/ai-stack/bare-metal/llama-cpp/install.sh
-bash ~/ai-stack/bare-metal/stt/install.sh
-bash ~/ai-stack/bare-metal/stt-proxy/install.sh  # optional
+bash ~/ai-stack/bare-metal/stt/install.sh        # includes hypr-stt
+bash ~/ai-stack/bare-metal/stt-proxy/install.sh  # optional (for Open WebUI mic)
 ai-stack up  # Start containers
 ```
 
@@ -411,14 +410,18 @@ hf cache ls
 ## 🔍 Testing
 
 ```bash
-# Test STT Proxy + Router Mode integration
-test-router-mode.sh
+# Smoke test (verify all services)
+ai-stack-smoke-test
 
-# Test individual services
+# Integration test (STT Proxy + Router Mode)
+bare-metal/stt-proxy/test-router-mode.sh
+
+# Manual health checks
 curl http://localhost:7861/health      # Whisper STT
+curl http://localhost:7861/ready       # Whisper Ready
 curl http://localhost:7865/health      # llama.cpp
 curl http://localhost:7866/health      # STT Proxy
-curl http://localhost:7860             # Open WebUI
+curl http://localhost:7860/health      # Open WebUI
 
 # Monitor VRAM during testing
 watch -n1 nvidia-smi
