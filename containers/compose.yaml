@@ -79,7 +79,6 @@ services:
       - type: bind
         source: ${AI_STACK_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack}/searxng
         target: /etc/searxng
-        read_write: true
     environment:
       - BASE_URL=http://localhost:7863/
       - SEARXNG_SECRET=${SEARXNG_SECRET:?SEARXNG_SECRET not set}
@@ -143,6 +142,11 @@ services:
       - N8N_PROTOCOL=http
       - NODE_ENV=production
       - WEBHOOK_URL=http://localhost:7862/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
     volumes:
       - type: volume
         source: n8n-data
