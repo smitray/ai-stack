@@ -27,8 +27,7 @@ LLAMA_CPP_URL = os.environ.get("LLAMA_CPP_URL", "http://localhost:7865")
 PROXY_PORT = int(os.environ.get("STT_PROXY_PORT", "7866"))
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger("stt-proxy")
 
@@ -53,10 +52,7 @@ async def unload_llama_model() -> dict:
     # Empty body = unload whatever model is currently loaded (model-agnostic)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                f"{LLAMA_CPP_URL}/models/unload",
-                json={}
-            )
+            response = await client.post(f"{LLAMA_CPP_URL}/models/unload", json={})
             if response.status_code == 200:
                 logger.info("Model unloaded via llama.cpp API")
                 # Write state file
@@ -75,9 +71,12 @@ async def unload_llama_model() -> dict:
     # Method 2: systemd stop (fallback)
     try:
         process = await asyncio.create_subprocess_exec(
-            "systemctl", "--user", "stop", "llama-cpp",
+            "systemctl",
+            "--user",
+            "stop",
+            "llama-cpp",
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await process.communicate()
 
@@ -98,14 +97,14 @@ async def unload_llama_model() -> dict:
 async def write_state(active: str) -> None:
     """Write VRAM state file."""
     import os
-    
+
     state_file = f"/run/user/{os.getuid()}/ai-stack-vram-state"
     state = {"active": active, "timestamp": int(asyncio.get_event_loop().time())}
-    
+
     try:
         run_dir = os.path.dirname(state_file)
         os.makedirs(run_dir, exist_ok=True)
-        with open(state_file, 'w') as f:
+        with open(state_file, "w") as f:
             json.dump(state, f)
         logger.debug(f"State written: {active}")
     except Exception as e:
@@ -113,11 +112,27 @@ async def write_state(active: str) -> None:
 
 
 async def wait_for_whisper_ready(max_wait: int = 30) -> bool:
-    """Wait for Whisper STT to be ready."""
+    """Start whisper-server if stopped, then wait for readiness."""
+    # Start whisper-server if not running
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "systemctl",
+            "--user",
+            "start",
+            "whisper-server.service",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        logger.info("whisper-server.service start attempted")
+    except Exception as e:
+        logger.warning(f"Failed to start whisper-server: {e}")
+
+    # Wait for /ready endpoint
     async with httpx.AsyncClient(timeout=5.0) as client:
         for i in range(max_wait):
             try:
-                response = await client.get(f"{_WHISPER_BASE}/health")
+                response = await client.get(f"{_WHISPER_BASE}/ready")
                 if response.status_code == 200:
                     logger.info("Whisper STT is ready")
                     return True
@@ -134,7 +149,7 @@ async def transcribe_audio(
     file: UploadFile = File(...),
     model: str | None = Form(None),
     language: str | None = Form(None),
-    response_format: str | None = Form("json")
+    response_format: str | None = Form("json"),
 ):
     """
     Transcribe audio with automatic llama.cpp unloading.
@@ -162,7 +177,9 @@ async def transcribe_audio(
 
     # Prepare multipart form data
     form_data = httpx.FormData()
-    form_data.add_field("file", await file.read(), filename=file.filename or "audio.wav")
+    form_data.add_field(
+        "file", await file.read(), filename=file.filename or "audio.wav"
+    )
     if model:
         form_data.add_field("model", model)
     if language:
@@ -174,7 +191,9 @@ async def transcribe_audio(
             response = await client.post(WHISPER_URL, data=form_data)
 
             if response.status_code != 200:
-                logger.error(f"Whisper STT returned {response.status_code}: {response.text}")
+                logger.error(
+                    f"Whisper STT returned {response.status_code}: {response.text}"
+                )
                 raise HTTPException(status_code=500, detail="Transcription failed")
 
             logger.info("Transcription successful")
@@ -197,24 +216,24 @@ async def health_check():
 @app.get("/status")
 async def get_status():
     """Get proxy and service status."""
-    status = {
-        "proxy": "running",
-        "whisper_stt": "unknown",
-        "llama_cpp": "unknown"
-    }
+    status = {"proxy": "running", "whisper_stt": "unknown", "llama_cpp": "unknown"}
 
     async with httpx.AsyncClient(timeout=5.0) as client:
         # Check Whisper
         try:
             response = await client.get("http://localhost:7861/health")
-            status["whisper_stt"] = "healthy" if response.status_code == 200 else "unhealthy"
+            status["whisper_stt"] = (
+                "healthy" if response.status_code == 200 else "unhealthy"
+            )
         except Exception:
             status["whisper_stt"] = "not_running"
 
         # Check llama.cpp
         try:
             response = await client.get(f"{LLAMA_CPP_URL}/health")
-            status["llama_cpp"] = "healthy" if response.status_code == 200 else "unhealthy"
+            status["llama_cpp"] = (
+                "healthy" if response.status_code == 200 else "unhealthy"
+            )
         except Exception:
             status["llama_cpp"] = "not_running"
 
