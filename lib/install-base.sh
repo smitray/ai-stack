@@ -86,6 +86,8 @@ echo "[5/8] Installing ai-stack CLI..."
 mkdir -p "$HOME/.local/bin"
 cp "$REPO_ROOT/bin/ai-stack" "$HOME/.local/bin/ai-stack"
 chmod +x "$HOME/.local/bin/ai-stack"
+cp "$REPO_ROOT/bin/ai-stack-smoke-test" "$HOME/.local/bin/"
+chmod +x "$HOME/.local/bin/ai-stack-smoke-test"
 echo "  Installed to $HOME/.local/bin/ai-stack"
 
 # ---------------------------------------------------------------------------
