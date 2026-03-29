@@ -10,7 +10,11 @@ model:
   name: "deepdml/faster-whisper-large-v3-turbo-ct2"
   device: "auto"
   compute_type: "float16"
-  load_on_startup: true  # Set to false to delay model load until first request
+  # Eager mode: model loads on server startup (~1.5-2 GB VRAM).
+  # Lazy mode: set to false, model loads on first request.
+  # Eager is recommended for VRAM-constrained systems to avoid
+  # unexpected memory pressure during transcription.
+  load_on_startup: true
 
 gpu:
   min_vram_mb: 1500
