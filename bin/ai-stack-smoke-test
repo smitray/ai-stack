@@ -60,7 +60,7 @@ echo ""
 echo -e "${BLUE}GPU Services:${NC}"
 check "Whisper STT" "http://localhost:7861/health"
 check "Whisper Ready" "http://localhost:7861/ready"
-check "llama.cpp" "http://localhost:8080/health"
+check "llama.cpp" "http://localhost:7865/health"
 check "STT Proxy" "http://localhost:7866/health"
 
 # Summary
