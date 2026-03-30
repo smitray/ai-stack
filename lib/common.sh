@@ -7,6 +7,14 @@
 #   source "${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack/lib/common.sh"
 #
 
+# === Terminal Colors ===
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
 # === XDG Base Directories ===
 AI_STACK_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack"
 AI_STACK_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ai-stack"
@@ -36,4 +44,28 @@ load_env() {
         source "$HOME/.zshenv"
         set +a
     fi
+}
+
+# =============================================================================
+# Helper: validate_required_secrets
+#   Validates that required secrets are set in the environment.
+#   Call after load_env to ensure secrets are available.
+# =============================================================================
+validate_required_secrets() {
+    local missing=()
+    local required=("POSTGRES_PASSWORD" "OPENWEBUI_DB_PASSWORD" "WEBUI_SECRET_KEY" "SEARXNG_SECRET")
+    
+    for secret in "${required[@]}"; do
+        if [ -z "${!secret:-}" ]; then
+            missing+=("$secret")
+        fi
+    done
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo -e "${RED}ERROR: Missing required secrets:${NC}"
+        printf '  - %s\n' "${missing[@]}"
+        echo "Please set these in ~/.zshenv"
+        return 1
+    fi
+    return 0
 }

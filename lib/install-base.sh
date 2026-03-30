@@ -16,7 +16,7 @@ echo ""
 # 1. System dependencies
 # ---------------------------------------------------------------------------
 echo "[1/8] Checking system dependencies..."
-DEPENDENCIES=(podman podman-compose nvidia-container-toolkit base-devel cmake git cuda)
+DEPENDENCIES=(podman podman-compose nvidia-container-toolkit base-devel cmake git cuda jq)
 MISSING=()
 
 for pkg in "${DEPENDENCIES[@]}"; do
@@ -86,6 +86,8 @@ echo "[5/8] Installing ai-stack CLI..."
 mkdir -p "$HOME/.local/bin"
 cp "$REPO_ROOT/bin/ai-stack" "$HOME/.local/bin/ai-stack"
 chmod +x "$HOME/.local/bin/ai-stack"
+cp "$REPO_ROOT/bin/ai-stack-smoke-test" "$HOME/.local/bin/"
+chmod +x "$HOME/.local/bin/ai-stack-smoke-test"
 echo "  Installed to $HOME/.local/bin/ai-stack"
 
 # ---------------------------------------------------------------------------
@@ -100,6 +102,15 @@ cp -r "$REPO_ROOT/containers/searxng/config/." "$AI_STACK_CONFIG_DIR/searxng/"
 mkdir -p "$AI_STACK_CONFIG_DIR/qdrant"
 cp "$REPO_ROOT/containers/qdrant/config/production.yaml" "$AI_STACK_CONFIG_DIR/qdrant/production.yaml"
 echo "  Installed to $AI_STACK_CONFIG_DIR/compose.yaml"
+
+# ---------------------------------------------------------------------------
+# Configure journald retention (7 days)
+# ---------------------------------------------------------------------------
+echo "[6.5/8] Configuring journald retention..."
+JOURNALD_DIR="$HOME/.config/systemd/journald.conf.d"
+mkdir -p "$JOURNALD_DIR"
+cp "$REPO_ROOT/lib/journald-ai-stack.conf" "$JOURNALD_DIR/ai-stack.conf"
+echo "  Configured 7-day log retention"
 
 # ---------------------------------------------------------------------------
 # 7. Create XDG data directories (volume mounts)
@@ -167,7 +178,7 @@ echo ""
 echo "Next steps:"
 echo "  1. Fill in API keys: $ZSHENV"
 echo "  2. source $ZSHENV"
-echo "  3. ai-stack install llama-cpp"
-echo "  4. ai-stack install stt"
+echo "  3. bash $REPO_ROOT/bare-metal/llama-cpp/install.sh"
+echo "  4. bash $REPO_ROOT/bare-metal/stt/install.sh"
 echo "  5. ai-stack up"
 echo ""

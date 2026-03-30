@@ -67,14 +67,17 @@ ai-stack/
 | `AGENTS.md` | This file |
 | `docs/prd/*.md` | Design specifications |
 | `docs/superpowers/plans/*.md` | Implementation plans |
-| `.env.example` | Environment template |
 | `bin/ai-stack` | Main management CLI |
 
 ## Common Tasks
 
 ```bash
 # Install everything
-ai-stack install all
+bash ~/ai-stack/lib/install-base.sh
+bash ~/ai-stack/bare-metal/llama-cpp/install.sh
+bash ~/ai-stack/bare-metal/stt/install.sh
+bash ~/ai-stack/bare-metal/stt-proxy/install.sh  # optional
+ai-stack up  # Start containers
 
 # Start/stop containers
 ai-stack up
@@ -93,6 +96,23 @@ ai-stack models download <repo> # Download specific model
 
 # VRAM status
 nvidia-smi --query-gpu=memory.used,memory.free --format=csv
+
+# Logs (journald + podman, 7-day retention)
+ai-stack logs --help      # List available services
+ai-stack logs             # All services (last 10 lines each)
+ai-stack logs whisper-server
+ai-stack logs llama-cpp
+ai-stack logs open-webui
+ai-stack logs errors      # Errors from all services
+
+# Interactive mode (requires fzf)
+ai-stack fzf logs         # Interactive log viewer (fzf + bat)
+ai-stack fzf services     # Interactive service picker
+ai-stack fzf models       # Search HuggingFace Hub
+ai-stack logs --fzf       # Shortcut for fzf logs viewer
+
+# Smoke test (verify all services)
+ai-stack-smoke-test
 ```
 
 ## Model Downloads
@@ -156,7 +176,7 @@ ai-stack models status
 
 ### Default Models Installation
 
-During `ai-stack install all`:
+During `bash ~/ai-stack/lib/install-base.sh`:
 1. HF CLI installed globally via pip
 2. Authenticated with `HF_TOKEN` from `.env`
 3. Default models pre-downloaded to HF cache:

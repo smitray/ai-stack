@@ -138,14 +138,15 @@ ai-stack gpu status
 ### Management
 
 ```bash
-# llama.cpp router status
-llama-router status
+# llama.cpp status
+ai-stack gpu status
 
 # Unload model manually
-llama-router unload
+ai-stack gpu off
 
-# List models
-llama-router models
+# Or via curl
+curl http://localhost:7865/models
+curl -X POST http://localhost:7865/models/unload
 ```
 
 ### Testing
@@ -244,9 +245,7 @@ nvidia-smi
 ai-stack vram state
 
 # Unload llama.cpp
-ai-stack vram stt
-# OR
-llama-router unload
+ai-stack gpu off
 
 # Or switch GPU mode
 ai-stack gpu stt   # For STT

@@ -5,11 +5,18 @@
 
 set -e
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Source common.sh if available
+COMMON_SH="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack/lib/common.sh"
+if [ -f "$COMMON_SH" ]; then
+    source "$COMMON_SH"
+fi
+
+# Colors (fallback if common.sh not available)
+: "${RED:='\033[0;31m'}"
+: "${GREEN:='\033[0;32m'}"
+: "${YELLOW:='\033[1;33m'}"
+: "${BLUE:='\033[0;34m'}"
+: "${NC:='\033[0m'}"
 
 LLAMA_CPP_URL="http://localhost:7865"
 WHISPER_URL="http://localhost:7861"

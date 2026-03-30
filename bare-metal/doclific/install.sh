@@ -25,6 +25,10 @@ DOCLIFIC_PORT=7864
 echo "Installing Doclific (port $DOCLIFIC_PORT)..."
 
 # Install doclific binary via official installer
+# NOTE: For supply-chain safety, consider downloading the script first and inspecting:
+#   curl -fsSL https://raw.githubusercontent.com/muellerluke/doclific/main/scripts/install.sh -o /tmp/doclific-install.sh
+#   less /tmp/doclific-install.sh
+#   bash /tmp/doclific-install.sh
 curl -fsSL https://raw.githubusercontent.com/muellerluke/doclific/main/scripts/install.sh | bash
 
 # Configure port (doclific stores config at ~/.config/doclific/config.json)

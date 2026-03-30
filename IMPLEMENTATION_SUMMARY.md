@@ -55,13 +55,13 @@ ExecStart=llama-server \
 
 ### 3. Management CLI
 
-**File:** `bin/llama-router`
+**File:** `bin/ai-stack`
 
 ```bash
-llama-router status      # Show router status
-llama-router models      # List models
-llama-router unload      # Unload model
-llama-router load <name> # Load model
+ai-stack gpu status      # Show GPU usage
+ai-stack gpu llm         # Activate LLM
+ai-stack gpu stt         # Activate STT
+ai-stack gpu off         # Free all VRAM
 ```
 
 ---
@@ -134,7 +134,7 @@ test-router-mode.sh  # Test all endpoints
 | `templates/zshenv.template` | Environment template |
 | `bare-metal/stt-proxy/test-router-mode.sh` | Test suite |
 | `bare-metal/stt-proxy/README.md` | Documentation |
-| `bin/llama-router` | Management CLI |
+| `bin/ai-stack` | Main management CLI |
 | `bare-metal/stt/scripts/whisper-activity` | Activity tracking |
 | `bare-metal/stt/scripts/whisper-client` | Comprehensive CLI |
 
@@ -152,21 +152,133 @@ test-router-mode.sh  # Test all endpoints
 
 ```bash
 # Base installation
-ai-stack install base
+bash lib/install-base.sh
+
+# Install LLM
+bash bare-metal/llama-cpp/install.sh
 
 # Install STT
-ai-stack install stt
+bash bare-metal/stt/install.sh
 
-# Install llama.cpp
-ai-stack install llama-cpp
-
-# Install STT Proxy
+# Install STT Proxy (optional)
 bash bare-metal/stt-proxy/install.sh
 systemctl --user start stt-proxy
 
 # Start all services
 systemctl --user start llama-cpp whisper-server stt-proxy
 ```
+
+---
+
+## Unified Logging System
+
+**Date:** 2026-03-30  
+**Status:** ✅ Complete
+
+### Architecture
+
+- **journald** for bare-metal services (already systemd)
+- **podman logs** pulled on-demand for containers
+- **Auto-detection** of services dynamically from systemd + compose file
+- **7-day retention** via journald.conf.d override
+
+### Configuration
+
+**File:** `~/.config/systemd/journald.conf.d/ai-stack.conf`
+
+```ini
+[Journal]
+SystemMaxUse=7d
+SystemMaxFileSize=100M
+```
+
+### CLI Usage
+
+```bash
+ai-stack logs --help      # List available services
+ai-stack logs             # All services (last 10 lines each)
+ai-stack logs whisper-server
+ai-stack logs llama-cpp
+ai-stack logs open-webui
+ai-stack logs errors      # Errors from all services
+ai-stack logs --fzf       # Interactive viewer (fzf + bat)
+```
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `lib/journald-ai-stack.conf` | journald retention config |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `lib/install-base.sh` | Install journald config |
+| `bin/ai-stack` | Enhanced logs command |
+
+---
+
+## fzf Integration
+
+**Date:** 2026-03-30  
+**Status:** ✅ Complete
+
+### Architecture
+
+- **fzf** for interactive selection
+- **bat** for syntax highlighting
+- **rg** for search
+- **Opt-in** - Only works if fzf installed
+
+### Modes
+
+1. **Logs Viewer** (`ai-stack fzf logs`) - Pick a service, see logs with bat highlighting
+2. **Service Picker** (`ai-stack fzf services`) - Interactive service list with status preview
+3. **Model Search** (`ai-stack fzf models`) - Search HuggingFace Hub
+
+### CLI Usage
+
+```bash
+ai-stack fzf logs         # Interactive log viewer
+ai-stack fzf services     # Interactive service picker
+ai-stack fzf models       # Search HuggingFace Hub
+ai-stack logs --fzf       # Shortcut for logs viewer
+```
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `bin/ai-stack` | Added fzf subcommand + helper functions |
+
+---
+
+## Smoke Test
+
+**Date:** 2026-03-30  
+**Status:** ✅ Complete
+
+### Purpose
+
+Quick verification that all services are responding.
+
+### Usage
+
+```bash
+ai-stack-smoke-test
+```
+
+### Checks
+
+- **Containers:** Open WebUI (7860)
+- **GPU Services:** Whisper STT (7861), llama.cpp (7865), STT Proxy (7866)
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `bin/ai-stack-smoke-test` | Smoke test script |
 
 ---
 
@@ -177,9 +289,8 @@ systemctl --user start llama-cpp whisper-server stt-proxy
 test-router-mode.sh
 
 # Test llama.cpp router
-llama-router status
-llama-router models
-llama-router unload
+curl http://localhost:7865/models
+curl -X POST http://localhost:7865/models/unload
 
 # Test STT Proxy
 curl http://localhost:7866/health
@@ -260,7 +371,7 @@ journalctl --user -u stt-proxy -f
 ### VRAM not freeing
 ```bash
 nvidia-smi
-llama-router unload
+ai-stack gpu off
 curl -X POST http://localhost:7865/models/unload
 ```
 

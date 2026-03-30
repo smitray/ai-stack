@@ -23,6 +23,83 @@ COMPOSE_FILE="$AI_STACK_CONFIG_DIR/compose.yaml"
 COMMAND=$1
 shift || true
 
+# === fzf Helper Functions ===
+
+check_fzf() {
+    if ! command -v fzf &>/dev/null; then
+        echo -e "${RED}Error: fzf not installed${NC}"
+        echo "Install with: pacman -S fzf"
+        return 1
+    fi
+}
+
+get_all_services() {
+    # Bare-metal services
+    echo "whisper-server"
+    echo "llama-cpp"
+    echo "stt-proxy"
+
+    # Container services (from compose)
+    if [ -f "$COMPOSE_FILE" ]; then
+        podman compose -f "$COMPOSE_FILE" ps --services 2>/dev/null | while read -r svc; do
+            echo "$svc"
+        done
+    fi
+}
+
+get_logs_cmd() {
+    local svc="$1"
+    case "$svc" in
+        whisper-server|llama-cpp|stt-proxy)
+            echo "journalctl --user -u $svc -o short --no-pager -n 200"
+            ;;
+        *)
+            echo "podman logs $svc --tail 200"
+            ;;
+    esac
+}
+
+fzf_logs() {
+    local services
+    services=$(get_all_services | sort | uniq)
+    local selected
+    selected=$(echo "$services" | fzf --prompt="Select service: " --height=40%)
+    [ -z "$selected" ] && return
+
+    local logs_cmd
+    logs_cmd=$(get_logs_cmd "$selected")
+    echo -e "${BLUE}=== Logs: $selected ===${NC}"
+    eval "$logs_cmd" | bat --style=auto -l log --color=always
+}
+
+fzf_services() {
+    local services
+    services=$(get_all_services | sort | uniq)
+    local selected
+    selected=$(echo "$services" | fzf --prompt="Select service: " --height=40% \
+        --preview="echo '=== Status ===' && ai-stack status 2>/dev/null | grep {1} || echo 'service not running'")
+    [ -z "$selected" ] && return
+
+    # Show status of selected service
+    echo -e "${BLUE}=== Status: $selected ===${NC}"
+    if [[ "$selected" == "whisper-server" || "$selected" == "llama-cpp" || "$selected" == "stt-proxy" ]]; then
+        systemctl --user status "$selected" --no-pager
+    else
+        podman compose -f "$COMPOSE_FILE" ps "$selected"
+    fi
+}
+
+fzf_models() {
+    echo -e "${BLUE}Searching HuggingFace Hub...${NC}"
+    local model
+    model=$(hf hub list 2>/dev/null | fzf --prompt="Search model: " --height=60% \
+        --preview="hf hub info {1} 2>/dev/null | head -20")
+    [ -z "$model" ] && return
+
+    echo -e "${GREEN}Selected: $model${NC}"
+    echo "Download with: hf download $model"
+}
+
 case "$COMMAND" in
     up)
         load_env
@@ -39,7 +116,80 @@ case "$COMMAND" in
         podman compose -f "$COMPOSE_FILE" ps
         ;;
     logs)
-        podman compose -f "$COMPOSE_FILE" logs -f "$@"
+        # Check for --fzf flag
+        if [[ "$1" == "--fzf" ]]; then
+            check_fzf || exit 1
+            fzf_logs
+            exit 0
+        fi
+
+        SERVICE="${1:-all}"
+        shift 2>/dev/null || true
+
+        case "$SERVICE" in
+            all)
+                echo -e "\033[0;34m=== AI Stack Logs ===\033[0m"
+                echo ""
+                # Bare-metal services
+                for svc in whisper-server llama-cpp stt-proxy; do
+                    if systemctl --user is-active "$svc" &>/dev/null; then
+                        echo -e "\033[1;33m[$svc]\033[0m"
+                        journalctl --user -u "$svc" -o short --no-pager -n 10 2>/dev/null || echo "  (no logs)"
+                        echo ""
+                    fi
+                done
+                # Container services
+                if [ -f "$COMPOSE_FILE" ]; then
+                    for ctr in $(podman compose -f "$COMPOSE_FILE" ps --services 2>/dev/null); do
+                        echo -e "\033[1;33m[$ctr]\033[0m"
+                        podman logs "$ctr" --tail=10 --no-log-group 2>/dev/null | head -10 || echo "  (no logs)"
+                        echo ""
+                    done
+                fi
+                ;;
+            errors)
+                echo -e "\033[0;31m=== Errors from all services ===\033[0m"
+                echo ""
+                for svc in whisper-server llama-cpp stt-proxy; do
+                    journalctl --user -u "$svc" -o short --no-pager -n 100 2>/dev/null | grep -iE "error|warn|fail|crit" && echo "" || true
+                done
+                if [ -f "$COMPOSE_FILE" ]; then
+                    for ctr in $(podman compose -f "$COMPOSE_FILE" ps --services 2>/dev/null); do
+                        podman logs "$ctr" --tail=100 2>/dev/null | grep -iE "error|warn|fail|crit" | sed "s/^/[$ctr] /" || true
+                    done
+                fi
+                ;;
+            whisper-server|llama-cpp|stt-proxy)
+                journalctl --user -u "$SERVICE" -o short --no-pager -n 100 "$@"
+                ;;
+            --help|-h)
+                echo "Usage: ai-stack logs [service|errors|--help]"
+                echo ""
+                echo "Services:"
+                echo "  whisper-server  STT service logs (journald)"
+                echo "  llama-cpp       LLM service logs (journald)"
+                echo "  stt-proxy       STT Proxy logs (journald)"
+                echo "  errors          Show errors from all services"
+                echo ""
+                echo "Container services (auto-detected from compose):"
+                for ctr in $(podman compose -f "$COMPOSE_FILE" ps --services 2>/dev/null); do
+                    echo "  $ctr"
+                done
+                echo ""
+                echo "Options:"
+                echo "  --since=1h      Time range"
+                echo "  -f              Follow mode"
+                ;;
+            *)
+                if [ -f "$COMPOSE_FILE" ] && podman compose -f "$COMPOSE_FILE" ps --services 2>/dev/null | grep -q "^$SERVICE$"; then
+                    podman logs "$SERVICE" --tail=100 "$@"
+                else
+                    echo "Unknown service: $SERVICE"
+                    echo "Run 'ai-stack logs --help' for available services"
+                    exit 1
+                fi
+                ;;
+        esac
         ;;
     gpu)
         MODE=$1
@@ -173,16 +323,18 @@ case "$COMMAND" in
         esac
         ;;
     install)
-        echo "ERROR: 'ai-stack install' is not available from the installed CLI."
+        echo "Installation is done via repo scripts, not the CLI."
         echo ""
-        echo "Installation is done from the repo. Run:"
-        echo "  bash /path/to/ai-stack/lib/install-base.sh"
+        echo "To install:"
+        echo "  1. Base setup:       bash ~/ai-stack/lib/install-base.sh"
+        echo "  2. LLM server:       bash ~/ai-stack/bare-metal/llama-cpp/install.sh"
+        echo "  3. STT server:       bash ~/ai-stack/bare-metal/stt/install.sh"
+        echo "  4. STT Proxy:        bash ~/ai-stack/bare-metal/stt-proxy/install.sh"
+        echo "  5. Start containers: ai-stack up"
         echo ""
-        echo "Component installers:"
-        echo "  bash /path/to/ai-stack/bare-metal/llama-cpp/install.sh"
-        echo "  bash /path/to/ai-stack/bare-metal/stt/install.sh"
-        echo "  bash /path/to/ai-stack/bare-metal/stt-proxy/install.sh"
-        exit 1
+        echo "Or use the one-liner:"
+        echo "  curl -fsSL https://.../install.sh | bash"
+        exit 0
         ;;
     models)
         load_env
@@ -256,6 +408,25 @@ EOF
                 ;;
         esac
         ;;
+    fzf)
+        check_fzf || exit 1
+        FZF_MODE="${1:-}"
+        shift 2>/dev/null || true
+
+        case "$FZF_MODE" in
+            logs) fzf_logs ;;
+            services) fzf_services ;;
+            models) fzf_models ;;
+            *)
+                echo "Usage: ai-stack fzf {logs|services|models}"
+                echo ""
+                echo "  logs      Interactive log viewer (fzf + bat)"
+                echo "  services  Interactive service picker"
+                echo "  models    Search HuggingFace models"
+                exit 1
+                ;;
+        esac
+        ;;
     *)
         cat <<EOF
 AI Stack Management CLI
@@ -267,10 +438,11 @@ Commands:
   down            Stop all containers
   restart         Restart containers
   status          Show container status
-  logs            View container logs
+  logs            View logs (ai-stack logs [service|errors|--help])
   gpu             GPU mode (stt|llm|off|status)
   vram            VRAM state (stt|llm|status|state|clear|history)
   models          Model management (list|status|download|add-llama|cleanup)
+  fzf             Interactive mode (ai-stack fzf {logs|services|models})
 
 Environment Variables:
   WHISPER_URL     Whisper STT URL (default: http://localhost:7861)

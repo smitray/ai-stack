@@ -9,7 +9,7 @@ readonly IDLE_TIMEOUT=600  # 10 minutes
 readonly CHECK_INTERVAL=10
 readonly PORT="${WHISPER_PORT:-7861}"
 readonly API_URL="http://localhost:$PORT"
-readonly IDLE_FILE="/run/user/$(id -u)/whisper-api-idle"
+readonly IDLE_FILE="/run/user/$(id -u)/whisper-server-idle"
 
 log() {
     echo "[$(date '+%H:%M:%S')] [idle-monitor] $*" >&2

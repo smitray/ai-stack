@@ -64,8 +64,7 @@ GPU services are **mutually exclusive** — only one can hold VRAM at a time:
 ```
 ai-stack/
 ├── bin/
-│   ├── ai-stack                    # Main management CLI
-│   └── llama-router                # llama.cpp router management
+│   └── ai-stack                    # Main management CLI
 │
 ├── bare-metal/
 │   ├── stt/                        # Whisper STT server
@@ -154,8 +153,11 @@ bash lib/install-base.sh
 # 4. Source environment
 source ~/.zshenv
 
-# 5. Install all components
-ai-stack install all
+# 5. Install components
+bash ~/ai-stack/bare-metal/llama-cpp/install.sh
+bash ~/ai-stack/bare-metal/stt/install.sh        # includes hypr-stt
+bash ~/ai-stack/bare-metal/stt-proxy/install.sh  # optional (for Open WebUI mic)
+ai-stack up  # Start containers
 ```
 
 ### Verify Installation
@@ -262,7 +264,10 @@ ai-stack up                    # Start all containers
 ai-stack down                  # Stop all containers
 ai-stack restart [service]     # Restart specific service
 ai-stack status                # Show container status
-ai-stack logs [service]        # View logs
+ai-stack logs [service]        # View logs (journald + podman)
+ai-stack logs errors           # Show errors from all services
+ai-stack logs --help           # List available services
+ai-stack logs --fzf            # Interactive log viewer
 ```
 
 #### GPU Mode Management
@@ -295,6 +300,17 @@ ai-stack models add-llama <n> <repo>    # Add model to presets
 ai-stack models cleanup [--dry-run]     # Cleanup HF cache
 ```
 
+#### Interactive Mode (fzf)
+
+Requires `fzf` to be installed (`pacman -S fzf`). Uses `bat` for syntax highlighting.
+
+```bash
+ai-stack fzf logs              # Interactive log viewer (fzf + bat)
+ai-stack fzf services          # Interactive service picker with status preview
+ai-stack fzf models            # Search HuggingFace Hub for models
+ai-stack logs --fzf            # Shortcut for fzf logs viewer
+```
+
 ### STT CLI (whisper-client)
 
 ```bash
@@ -307,14 +323,13 @@ whisper-client vram            # Show GPU VRAM usage
 whisper-client wait-ready      # Wait for server to be ready
 ```
 
-### llama.cpp Router CLI (llama-router)
+### llama.cpp Management (ai-stack gpu)
 
 ```bash
-llama-router models            # List all models with status
-llama-router load <model>      # Load specific model
-llama-router unload [model]    # Unload current model
-llama-router status            # Show router status
-llama-router health            # Check health endpoint
+ai-stack gpu status            # Show GPU usage and model
+ai-stack gpu llm               # Activate LLM
+ai-stack gpu stt               # Activate STT
+ai-stack gpu off               # Free all VRAM
 ```
 
 ### Systemd Service Management
@@ -409,14 +424,18 @@ hf cache ls
 ## 🔍 Testing
 
 ```bash
-# Test STT Proxy + Router Mode integration
-test-router-mode.sh
+# Smoke test (verify all services)
+ai-stack-smoke-test
 
-# Test individual services
+# Integration test (STT Proxy + Router Mode)
+bare-metal/stt-proxy/test-router-mode.sh
+
+# Manual health checks
 curl http://localhost:7861/health      # Whisper STT
+curl http://localhost:7861/ready       # Whisper Ready
 curl http://localhost:7865/health      # llama.cpp
 curl http://localhost:7866/health      # STT Proxy
-curl http://localhost:7860             # Open WebUI
+curl http://localhost:7860/health      # Open WebUI
 
 # Monitor VRAM during testing
 watch -n1 nvidia-smi
@@ -431,9 +450,9 @@ watch -n1 nvidia-smi
 nvidia-smi
 
 # Force unload
-ai-stack vram stt
+ai-stack gpu off
 # or
-llama-router unload
+systemctl --user stop whisper-server llama-cpp
 
 # Stop services
 systemctl --user stop whisper-server llama-cpp
