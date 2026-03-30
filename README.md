@@ -264,7 +264,10 @@ ai-stack up                    # Start all containers
 ai-stack down                  # Stop all containers
 ai-stack restart [service]     # Restart specific service
 ai-stack status                # Show container status
-ai-stack logs [service]        # View logs
+ai-stack logs [service]        # View logs (journald + podman)
+ai-stack logs errors           # Show errors from all services
+ai-stack logs --help           # List available services
+ai-stack logs --fzf            # Interactive log viewer
 ```
 
 #### GPU Mode Management
@@ -295,6 +298,17 @@ ai-stack models status                  # Check download status
 ai-stack models download <repo>         # Download specific model
 ai-stack models add-llama <n> <repo>    # Add model to presets
 ai-stack models cleanup [--dry-run]     # Cleanup HF cache
+```
+
+#### Interactive Mode (fzf)
+
+Requires `fzf` to be installed (`pacman -S fzf`). Uses `bat` for syntax highlighting.
+
+```bash
+ai-stack fzf logs              # Interactive log viewer (fzf + bat)
+ai-stack fzf services          # Interactive service picker with status preview
+ai-stack fzf models            # Search HuggingFace Hub for models
+ai-stack logs --fzf            # Shortcut for fzf logs viewer
 ```
 
 ### STT CLI (whisper-client)
