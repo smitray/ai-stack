@@ -101,7 +101,7 @@ services:
     ports:
       - "7860:8080"
     environment:
-      - WEBUI_AUTH=false
+      - WEBUI_AUTH=true
       - OPENAI_API_BASE_URL=http://host.containers.internal:7865/v1
       - RAG_EMBEDDING_ENGINE=
       - RAG_EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
