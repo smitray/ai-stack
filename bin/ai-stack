@@ -116,6 +116,13 @@ case "$COMMAND" in
         podman compose -f "$COMPOSE_FILE" ps
         ;;
     logs)
+        # Check for --fzf flag
+        if [[ "$1" == "--fzf" ]]; then
+            check_fzf || exit 1
+            fzf_logs
+            exit 0
+        fi
+
         SERVICE="${1:-all}"
         shift 2>/dev/null || true
 
