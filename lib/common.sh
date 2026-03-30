@@ -45,3 +45,27 @@ load_env() {
         set +a
     fi
 }
+
+# =============================================================================
+# Helper: validate_required_secrets
+#   Validates that required secrets are set in the environment.
+#   Call after load_env to ensure secrets are available.
+# =============================================================================
+validate_required_secrets() {
+    local missing=()
+    local required=("POSTGRES_PASSWORD" "OPENWEBUI_DB_PASSWORD" "WEBUI_SECRET_KEY" "SEARXNG_SECRET")
+    
+    for secret in "${required[@]}"; do
+        if [ -z "${!secret:-}" ]; then
+            missing+=("$secret")
+        fi
+    done
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo -e "${RED}ERROR: Missing required secrets:${NC}"
+        printf '  - %s\n' "${missing[@]}"
+        echo "Please set these in ~/.zshenv"
+        return 1
+    fi
+    return 0
+}
