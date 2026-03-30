@@ -23,6 +23,83 @@ COMPOSE_FILE="$AI_STACK_CONFIG_DIR/compose.yaml"
 COMMAND=$1
 shift || true
 
+# === fzf Helper Functions ===
+
+check_fzf() {
+    if ! command -v fzf &>/dev/null; then
+        echo -e "${RED}Error: fzf not installed${NC}"
+        echo "Install with: pacman -S fzf"
+        return 1
+    fi
+}
+
+get_all_services() {
+    # Bare-metal services
+    echo "whisper-server"
+    echo "llama-cpp"
+    echo "stt-proxy"
+
+    # Container services (from compose)
+    if [ -f "$COMPOSE_FILE" ]; then
+        podman compose -f "$COMPOSE_FILE" ps --services 2>/dev/null | while read -r svc; do
+            echo "$svc"
+        done
+    fi
+}
+
+get_logs_cmd() {
+    local svc="$1"
+    case "$svc" in
+        whisper-server|llama-cpp|stt-proxy)
+            echo "journalctl --user -u $svc -o short --no-pager -n 200"
+            ;;
+        *)
+            echo "podman logs $svc --tail 200"
+            ;;
+    esac
+}
+
+fzf_logs() {
+    local services
+    services=$(get_all_services | sort | uniq)
+    local selected
+    selected=$(echo "$services" | fzf --prompt="Select service: " --height=40%)
+    [ -z "$selected" ] && return
+
+    local logs_cmd
+    logs_cmd=$(get_logs_cmd "$selected")
+    echo -e "${BLUE}=== Logs: $selected ===${NC}"
+    eval "$logs_cmd" | bat --style=auto -l log --color=always
+}
+
+fzf_services() {
+    local services
+    services=$(get_all_services | sort | uniq)
+    local selected
+    selected=$(echo "$services" | fzf --prompt="Select service: " --height=40% \
+        --preview="echo '=== Status ===' && ai-stack status 2>/dev/null | grep {1} || echo 'service not running'")
+    [ -z "$selected" ] && return
+
+    # Show status of selected service
+    echo -e "${BLUE}=== Status: $selected ===${NC}"
+    if [[ "$selected" == "whisper-server" || "$selected" == "llama-cpp" || "$selected" == "stt-proxy" ]]; then
+        systemctl --user status "$selected" --no-pager
+    else
+        podman compose -f "$COMPOSE_FILE" ps "$selected"
+    fi
+}
+
+fzf_models() {
+    echo -e "${BLUE}Searching HuggingFace Hub...${NC}"
+    local model
+    model=$(hf hub list 2>/dev/null | fzf --prompt="Search model: " --height=60% \
+        --preview="hf hub info {1} 2>/dev/null | head -20")
+    [ -z "$model" ] && return
+
+    echo -e "${GREEN}Selected: $model${NC}"
+    echo "Download with: hf download $model"
+}
+
 case "$COMMAND" in
     up)
         load_env
