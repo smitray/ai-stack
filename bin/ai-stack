@@ -401,6 +401,25 @@ EOF
                 ;;
         esac
         ;;
+    fzf)
+        check_fzf || exit 1
+        FZF_MODE="${1:-}"
+        shift 2>/dev/null || true
+
+        case "$FZF_MODE" in
+            logs) fzf_logs ;;
+            services) fzf_services ;;
+            models) fzf_models ;;
+            *)
+                echo "Usage: ai-stack fzf {logs|services|models}"
+                echo ""
+                echo "  logs      Interactive log viewer (fzf + bat)"
+                echo "  services  Interactive service picker"
+                echo "  models    Search HuggingFace models"
+                exit 1
+                ;;
+        esac
+        ;;
     *)
         cat <<EOF
 AI Stack Management CLI
@@ -416,6 +435,7 @@ Commands:
   gpu             GPU mode (stt|llm|off|status)
   vram            VRAM state (stt|llm|status|state|clear|history)
   models          Model management (list|status|download|add-llama|cleanup)
+  fzf             Interactive mode (ai-stack fzf {logs|services|models})
 
 Environment Variables:
   WHISPER_URL     Whisper STT URL (default: http://localhost:7861)
