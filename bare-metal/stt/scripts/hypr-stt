@@ -28,7 +28,7 @@ readonly RUN_DIR="/run/user/$(id -u)"
 readonly STATE_FILE="$RUN_DIR/hypr-stt-state"
 readonly AUDIO_FILE="$RUN_DIR/hypr-stt-recording.wav"
 readonly PID_FILE="$RUN_DIR/hypr-stt-pid"
-readonly SERVER_PID_FILE="$RUN_DIR/whisper-api-server.pid"
+readonly SERVER_PID_FILE="$RUN_DIR/whisper-server.pid"
 readonly SERVER_LOG="$RUN_DIR/whisper-server.log"
 
 # Recording settings
@@ -40,7 +40,7 @@ readonly FORMAT="s16"
 # Logging
 # =============================================================================
 
-readonly LOG_DIR="$XDG_DATA_HOME/$SCRIPT_NAME"
+readonly LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/$SCRIPT_NAME"
 readonly LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d).log"
 
 init_log() {
@@ -79,7 +79,7 @@ init() {
     MODEL="${HYPR_STT_MODEL:-${WHISPER_MODEL:-small}}"
     PORT="${HYPR_STT_PORT:-${WHISPER_PORT:-7861}}"
     LANGUAGE="${HYPR_STT_LANGUAGE:-en}"
-    SERVER_SCRIPT="${HYPR_STT_SERVER:-$HOME/.local/bin/whisper-api-server}"
+    SERVER_SCRIPT="${HYPR_STT_SERVER:-$HOME/.local/bin/whisper-server}"
     KEYBIND="${HYPR_STT_KEYBIND:-SUPER+N}"
     
     # Secure file permissions
@@ -195,7 +195,7 @@ start_server() {
     # Prefer systemctl if available
     if command -v systemctl &>/dev/null; then
         # Start via systemd
-        if systemctl --user start whisper-api.service 2>/dev/null; then
+        if systemctl --user start whisper-server.service 2>/dev/null; then
             # Wait for server to be fully ready (model loaded)
             local max_wait=120
             local waited=0
@@ -216,7 +216,7 @@ start_server() {
                     if [[ -n "$loaded" ]]; then
                         log_info "Server ready, model loaded"
                         # Verify runtime files exist
-                        if [[ -f "$SERVER_PID_FILE" ]] || pgrep -f "whisper-api-server" >/dev/null 2>&1; then
+                        if [[ -f "$SERVER_PID_FILE" ]] || pgrep -f "whisper-server" >/dev/null 2>&1; then
                             log_info "Runtime files verified"
                             return 0
                         fi
@@ -224,7 +224,7 @@ start_server() {
                 fi
                 
                 # Check if service failed
-                if ! systemctl --user is-active --quiet whisper-api.service 2>/dev/null; then
+                if ! systemctl --user is-active --quiet whisper-server.service 2>/dev/null; then
                     log_error "Server failed to start"
                     return 1
                 fi
@@ -249,7 +249,7 @@ start_server() {
 
     # Find server script
     local script_path=""
-    for path in "$SERVER_SCRIPT" "$HOME/.local/bin/whisper-api-server" "$(dirname "$(readlink -f "$0")")/whisper-api-server"; do
+    for path in "$SERVER_SCRIPT" "$HOME/.local/bin/whisper-server" "$(dirname "$(readlink -f "$0")")/whisper-server"; do
         if [[ -x "$path" ]]; then
             script_path="$path"
             break
@@ -296,9 +296,9 @@ start_server() {
 
 stop_server() {
     # Prefer systemctl if service is managed by systemd
-    if command -v systemctl &>/dev/null && systemctl --user is-active --quiet whisper-api.service 2>/dev/null; then
+    if command -v systemctl &>/dev/null && systemctl --user is-active --quiet whisper-server.service 2>/dev/null; then
         log_info "Stopping Whisper server..."
-        if systemctl --user stop whisper-api.service 2>/dev/null; then
+        if systemctl --user stop whisper-server.service 2>/dev/null; then
             log_info "Server stopped"
             return 0
         fi
@@ -314,7 +314,7 @@ stop_server() {
 
     # Fallback: find by process name
     if [[ -z "$pid" ]] || ! is_process_running "$pid"; then
-        pid=$(pgrep -f "whisper-api-server" 2>/dev/null | head -1 || echo "")
+        pid=$(pgrep -f "whisper-server" 2>/dev/null | head -1 || echo "")
     fi
 
     if [[ -n "$pid" ]] && is_process_running "$pid"; then
@@ -431,7 +431,7 @@ start_recording() {
     
     # Verify runtime files are created and server is fully ready
     sleep 0.5
-    if [[ ! -f "$SERVER_PID_FILE" ]] && ! pgrep -f "whisper-api-server" >/dev/null 2>&1; then
+    if [[ ! -f "$SERVER_PID_FILE" ]] && ! pgrep -f "whisper-server" >/dev/null 2>&1; then
         log_error "Runtime files not created"
         return 1
     fi
@@ -766,6 +766,48 @@ cmd_reset() {
 
 cmd_list_mics() {
     list_input_devices
+}
+
+select_mic() {
+    local choice="$1"
+    local sources
+    sources=$(pactl list sources short 2>/dev/null | grep -v ".monitor")
+    
+    if [ -z "$sources" ]; then
+        echo "No audio input devices found"
+        return 1
+    fi
+    
+    if [ -n "$choice" ]; then
+        # Select by number
+        local device
+        device=$(echo "$sources" | sed -n "${choice}p" | awk '{print $2}')
+        if [ -z "$device" ]; then
+            echo "Invalid selection: $choice"
+            list_input_devices
+            return 1
+        fi
+    else
+        # Interactive selection using fzf if available
+        if command -v fzf &>/dev/null; then
+            device=$(echo "$sources" | awk '{print $2}' | fzf --prompt="Select mic: " --height=40%)
+            [ -z "$device" ] && return 0
+        else
+            echo "Usage: hypr-stt select-mic <number>"
+            echo "Or install fzf for interactive selection"
+            list_input_devices
+            return 1
+        fi
+    fi
+    
+    # Set as default source
+    pactl set-default-source "$device" 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "Default input set to: $device"
+    else
+        echo "Failed to set default input"
+        return 1
+    fi
 }
 
 cmd_select_mic() {
