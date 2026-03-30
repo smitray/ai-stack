@@ -16,13 +16,14 @@ import sys
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 import httpx
 
 MAX_UPLOAD_SIZE = int(os.environ.get("STT_MAX_UPLOAD_MB", "50")) * 1024 * 1024
 MAX_RETRIES = int(os.environ.get("STT_MAX_RETRIES", "3"))
 STT_TIMEOUT = int(os.environ.get("STT_TIMEOUT", "120"))
+STT_API_KEY = os.environ.get("STT_API_KEY", "")  # Empty = no auth (backward compatible)
 
 # Configuration — read from environment (set via systemd EnvironmentFile=~/.zshenv
 # or common.sh). Fallback values match defaults in lib/common.sh.
@@ -37,6 +38,30 @@ logging.basicConfig(
 logger = logging.getLogger("stt-proxy")
 
 app = FastAPI(title="STT Proxy", version="1.0.0")
+
+
+# API key authentication middleware
+# Only enforce if STT_API_KEY is set (backward compatible)
+@app.middleware("http")
+async def verify_api_key(request: Request, call_next):
+    if STT_API_KEY:
+        # Skip auth for health/status endpoints
+        if request.url.path in ("/health", "/status"):
+            return await call_next(request)
+
+        # Check Authorization header or X-API-Key header
+        api_key = request.headers.get("authorization", "").removeprefix("Bearer ")
+        if not api_key:
+            api_key = request.headers.get("x-api-key", "")
+
+        if api_key != STT_API_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={"error": {"message": "Invalid API key", "type": "auth_error"}},
+            )
+
+    return await call_next(request)
+
 
 http_client = httpx.AsyncClient(timeout=STT_TIMEOUT)
 

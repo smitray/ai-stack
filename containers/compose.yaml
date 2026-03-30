@@ -111,7 +111,7 @@ services:
       # Speech-to-Text Configuration (STT Proxy with VRAM management)
       - AUDIO_STT_ENGINE=openai
       - AUDIO_STT_OPENAI_API_BASE_URL=http://host.containers.internal:7866/v1
-      - AUDIO_STT_OPENAI_API_KEY=sk-no-key-required
+      - AUDIO_STT_OPENAI_API_KEY=${STT_API_KEY:-sk-no-key-required}
       - AUDIO_STT_MODEL=whisper-stt
     volumes:
       - type: volume
