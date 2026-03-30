@@ -43,7 +43,7 @@ services:
       - ai-stack
 
   qdrant:
-    image: docker.io/qdrant/qdrant:latest
+    image: docker.io/qdrant/qdrant:v1.13.4
     container_name: qdrant
     volumes:
       - type: bind
@@ -71,7 +71,7 @@ services:
       - ai-stack
 
   searxng:
-    image: docker.io/searxng/searxng:latest
+    image: docker.io/searxng/searxng:2025.2.15
     container_name: searxng
     ports:
       - "7863:8080"
@@ -96,7 +96,7 @@ services:
       - ai-stack
 
   openwebui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:v0.5.16
     container_name: openwebui
     ports:
       - "7860:8080"
@@ -132,7 +132,7 @@ services:
       - ai-stack
 
   n8n:
-    image: docker.io/n8nio/n8n:latest
+    image: docker.io/n8nio/n8n:1.80.5
     container_name: n8n
     ports:
       - "7862:5678"
