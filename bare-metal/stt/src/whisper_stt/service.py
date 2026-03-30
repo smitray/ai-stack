@@ -75,6 +75,21 @@ class TranscriptionService:
             del self.model
             self.model = None
 
+            # Force garbage collection
+            import gc
+
+            gc.collect()
+
+            # Clear CUDA cache if available
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    logger.debug("CUDA cache cleared")
+            except ImportError:
+                pass
+
     def is_model_loaded(self) -> bool:
         """Check if model is loaded."""
         return self.model is not None
