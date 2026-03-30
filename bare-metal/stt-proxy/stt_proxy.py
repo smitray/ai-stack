@@ -20,6 +20,10 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 import httpx
 
+MAX_UPLOAD_SIZE = int(os.environ.get("STT_MAX_UPLOAD_MB", "50")) * 1024 * 1024
+MAX_RETRIES = int(os.environ.get("STT_MAX_RETRIES", "3"))
+STT_TIMEOUT = int(os.environ.get("STT_TIMEOUT", "120"))
+
 # Configuration — read from environment (set via systemd EnvironmentFile=~/.zshenv
 # or common.sh). Fallback values match defaults in lib/common.sh.
 _WHISPER_BASE = os.environ.get("WHISPER_URL", "http://localhost:7861")
@@ -34,7 +38,7 @@ logger = logging.getLogger("stt-proxy")
 
 app = FastAPI(title="STT Proxy", version="1.0.0")
 
-http_client = httpx.AsyncClient(timeout=120.0)
+http_client = httpx.AsyncClient(timeout=STT_TIMEOUT)
 
 
 @app.on_event("shutdown")
@@ -46,49 +50,60 @@ async def unload_llama_model() -> dict:
     """
     Unload llama.cpp model from VRAM using native API.
     Falls back to systemd if API unavailable.
+    Retries on transient failures.
     """
     logger.info("Unloading llama.cpp model via API...")
 
-    # Method 1: Native llama.cpp router API (preferred)
-    # Empty body = unload whatever model is currently loaded (model-agnostic)
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(f"{LLAMA_CPP_URL}/models/unload", json={})
-            if response.status_code == 200:
-                logger.info("Model unloaded via llama.cpp API")
-                # Write state file
-                await write_state("stt")
-                return {"success": True, "method": "api"}
-            elif response.status_code == 404:
-                logger.debug("/models/unload endpoint not found, trying systemd")
-            else:
-                logger.warning(f"API returned {response.status_code}: {response.text}")
-    except httpx.ConnectError:
-        logger.debug("llama.cpp not running, nothing to unload")
-        return {"success": True, "method": "not_running"}
-    except Exception as e:
-        logger.debug(f"API unload failed: {e}")
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(f"{LLAMA_CPP_URL}/models/unload", json={})
+                if response.status_code == 200:
+                    logger.info("Model unloaded via llama.cpp API")
+                    await write_state("stt")
+                    return {"success": True, "method": "api"}
+                elif response.status_code == 404:
+                    logger.debug("/models/unload endpoint not found, trying systemd")
+                    break
+                else:
+                    logger.warning(
+                        f"API returned {response.status_code}: {response.text}"
+                    )
+        except httpx.ConnectError:
+            logger.debug("llama.cpp not running, nothing to unload")
+            return {"success": True, "method": "not_running"}
+        except Exception as e:
+            logger.warning(f"API unload attempt {attempt}/{MAX_RETRIES} failed: {e}")
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(1)
 
     # Method 2: systemd stop (fallback)
-    try:
-        process = await asyncio.create_subprocess_exec(
-            "systemctl",
-            "--user",
-            "stop",
-            "llama-cpp",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "systemctl",
+                "--user",
+                "stop",
+                "llama-cpp",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
 
-        if process.returncode == 0:
-            logger.info("Model unloaded via systemd")
-            await write_state("stt")
-            return {"success": True, "method": "systemd"}
-        else:
-            logger.warning(f"systemctl failed: {stderr.decode()}")
-    except Exception as e:
-        logger.warning(f"systemctl exception: {e}")
+            if process.returncode == 0:
+                logger.info("Model unloaded via systemd")
+                await write_state("stt")
+                return {"success": True, "method": "systemd"}
+            else:
+                logger.warning(
+                    f"systemctl attempt {attempt}/{MAX_RETRIES} failed: {stderr.decode()}"
+                )
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(1)
+        except Exception as e:
+            logger.warning(f"systemctl exception attempt {attempt}/{MAX_RETRIES}: {e}")
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(1)
 
     # Already unloaded or not running
     logger.info("llama.cpp not running or already unloaded")
@@ -105,9 +120,11 @@ async def write_state(active: str) -> None:
         os.makedirs(run_dir, exist_ok=True)
         with open(state_file, "w") as f:
             json.dump(state, f)
+        os.chmod(state_file, 0o600)
         logger.debug(f"State written: {active}")
     except Exception as e:
-        logger.debug(f"Failed to write state: {e}")
+        logger.error(f"Failed to write VRAM state: {e}")
+        raise
 
 
 async def wait_for_whisper_ready(max_wait: int = 30) -> bool:
@@ -174,20 +191,31 @@ async def transcribe_audio(
     # Step 3: Forward to Whisper STT
     logger.info("Forwarding audio to Whisper STT")
 
-    # Prepare multipart form data
-    form_data = httpx.FormData()
-    form_data.add_field(
-        "file", await file.read(), filename=file.filename or "audio.wav"
-    )
+    # Read and validate file
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds {MAX_UPLOAD_SIZE // (1024 * 1024)} MB limit",
+        )
+
+    # Build multipart request using httpx files parameter
+    files = {
+        "file": (
+            file.filename or "audio.wav",
+            content,
+            file.content_type or "application/octet-stream",
+        )
+    }
+    data: dict[str, str] = {"response_format": response_format or "json"}
     if model:
-        form_data.add_field("model", model)
+        data["model"] = model
     if language:
-        form_data.add_field("language", language)
-    form_data.add_field("response_format", response_format or "json")
+        data["language"] = language
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(WHISPER_URL, data=form_data)
+        async with httpx.AsyncClient(timeout=STT_TIMEOUT) as client:
+            response = await client.post(WHISPER_URL, files=files, data=data)
 
             if response.status_code != 200:
                 logger.error(
@@ -243,4 +271,4 @@ if __name__ == "__main__":
     import uvicorn
 
     logger.info(f"Starting STT Proxy on port {PROXY_PORT}")
-    uvicorn.run(app, host="0.0.0.0", port=PROXY_PORT)
+    uvicorn.run(app, host="127.0.0.1", port=PROXY_PORT)
