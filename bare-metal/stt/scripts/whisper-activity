@@ -13,7 +13,7 @@ set -euo pipefail
 
 readonly SCRIPT_NAME="whisper-activity"
 readonly RUN_DIR="/run/user/$(id -u)"
-readonly IDLE_FILE="$RUN_DIR/whisper-api-idle"
+readonly IDLE_FILE="$RUN_DIR/whisper-server-idle"
 readonly PORT="${WHISPER_PORT:-7861}"
 
 log_info() {

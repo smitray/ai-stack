@@ -20,8 +20,8 @@ PORT_FILE="$CONFIG_DIR/port"
 PORT="${WHISPER_PORT:-$(cat "$PORT_FILE" 2>/dev/null || echo 7861)}"
 API_URL="http://localhost:$PORT"
 RUN_DIR="/run/user/$(id -u)"
-PID_FILE="$RUN_DIR/whisper-api-server.pid"
-IDLE_FILE="$RUN_DIR/whisper-api-idle"
+PID_FILE="$RUN_DIR/whisper-server.pid"
+IDLE_FILE="$RUN_DIR/whisper-server-idle"
 
 # Source common.sh if available
 COMMON_SH="${XDG_CONFIG_HOME:-$HOME/.config}/ai-stack/lib/common.sh"

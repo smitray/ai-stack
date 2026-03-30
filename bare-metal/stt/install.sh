@@ -36,7 +36,7 @@ cd "$REPO_ROOT/bare-metal/stt"
 
 # Copy scripts
 cp "$REPO_ROOT/bare-metal/stt/scripts/"* "$HOME/.local/bin/"
-chmod +x "$HOME/.local/bin/"{whisper-client,hypr-stt,whisper-activity,idle-monitor.sh}
+chmod +x "$HOME/.local/bin/"{whisper-client,hypr-stt,whisper-activity,whisper-idle-monitor.sh}
 
 # Install systemd units
 mkdir -p "$HOME/.config/systemd/user"
